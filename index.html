@@ -6,8 +6,7 @@
   <title>景观设计文本排版工具</title>
   <!-- PDF.js：用于从PDF文件中提取文字内容 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <!-- JSZip：用于生成 IDML 压缩包（IDML 本质是 ZIP 格式） -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
   <style>
     /* ================================================
        全局变量 & Reset
@@ -466,6 +465,9 @@
     <span class="navbar-sub">A3横向 · 420×297mm · 页边距20mm</span>
   </div>
   <div class="navbar-right">
+    <button class="btn btn-secondary" onclick="testMinimalIDML()" title="导出最简单的测试IDML，用来判断问题在哪">
+      🧪 最小测试
+    </button>
     <button class="btn btn-secondary" onclick="openSettings()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       设置
@@ -2022,27 +2024,161 @@ function uploadSlot(id) {
 }
 
 /* ================================================
+   自建 ZIP 构建器（替代 JSZip）
+   IDML 规范：
+   - mimetype 必须第一个，STORE 压缩，extra field = 0
+   - 其余文件用 DEFLATE（与真实 InDesign 导出的 IDML 一致）
+   - 使用浏览器内置 CompressionStream（Chrome 80+ / Edge 80+ 均支持）
+================================================ */
+function _makeCRC32Table() {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+}
+const _CRC32_TABLE = _makeCRC32Table();
+
+function _crc32(data) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < data.length; i++)
+    c = (_CRC32_TABLE[(c ^ data[i]) & 0xFF] ^ (c >>> 8)) >>> 0;
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+/* 用浏览器内置 DeflateRaw 压缩数据（ZIP 里的 DEFLATE 是 raw deflate） */
+async function _deflateRaw(data) {
+  const cs = new CompressionStream('deflate-raw');
+  const writer = cs.writable.getWriter();
+  writer.write(data);
+  writer.close();
+  const chunks = [];
+  const reader = cs.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  let size = 0;
+  for (const c of chunks) size += c.length;
+  const out = new Uint8Array(size);
+  let pos = 0;
+  for (const c of chunks) { out.set(c, pos); pos += c.length; }
+  return out;
+}
+
+/* buildZipStore(entries) —— 返回 Promise<Uint8Array>
+   mimetype → STORE；其余文件 → DEFLATE（与真实 IDML 相同）
+   所有 local file header extra field = 0，flags = 0（纯 ASCII 路径无需 UTF-8 标志） */
+async function buildZipStore(entries) {
+  const enc = new TextEncoder();
+  const localParts = [];   // 本地文件头 + 数据块
+  const cdEntries  = [];   // 中央目录记录
+  let offset = 0;
+
+  for (const entry of entries) {
+    const name    = enc.encode(entry.name);
+    const rawData = typeof entry.data === 'string' ? enc.encode(entry.data) : entry.data;
+    const crc     = _crc32(rawData);             // CRC 用原始数据计算
+    const origSize = rawData.length;
+
+    /* mimetype 必须 STORE；其余用 DEFLATE */
+    const isMime = (entry.name === 'mimetype');
+    let compData, method, verNeeded;
+    if (isMime) {
+      compData  = rawData;
+      method    = 0;  // STORE
+      verNeeded = 10; // ZIP 1.0
+    } else {
+      compData  = await _deflateRaw(rawData);
+      /* 若压缩后反而更大（极小文件），退回 STORE */
+      if (compData.length >= origSize) { compData = rawData; method = 0; verNeeded = 10; }
+      else { method = 8; verNeeded = 20; } // DEFLATE，ZIP 2.0
+    }
+    const compSize = compData.length;
+
+    /* 本地文件头：30 字节固定 + 文件名，extra field = 0 */
+    const lh = new Uint8Array(30 + name.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0,  0x04034b50, true); // Local file header 签名
+    lv.setUint16(4,  verNeeded,  true); // 版本需求
+    lv.setUint16(6,  0x0000,     true); // flags = 0（路径全 ASCII，无需 UTF-8 标志）
+    lv.setUint16(8,  method,     true); // 压缩方式
+    lv.setUint16(10, 0,          true); // 修改时间
+    lv.setUint16(12, 0,          true); // 修改日期
+    lv.setUint32(14, crc,        true); // CRC-32（原始数据）
+    lv.setUint32(18, compSize,   true); // 压缩后大小
+    lv.setUint32(22, origSize,   true); // 原始大小
+    lv.setUint16(26, name.length,true); // 文件名长度
+    lv.setUint16(28, 0,          true); // extra field 长度 = 0（IDML 关键要求）
+    lh.set(name, 30);
+
+    cdEntries.push({ name, crc, compSize, origSize, offset, method, verNeeded });
+    localParts.push(lh, compData);
+    offset += 30 + name.length + compSize;
+  }
+
+  /* 中央目录 */
+  const cdStart  = offset;
+  const cdChunks = cdEntries.map(cd => {
+    const chunk = new Uint8Array(46 + cd.name.length);
+    const dv    = new DataView(chunk.buffer);
+    dv.setUint32(0,  0x02014b50,      true); // 中央目录签名
+    dv.setUint16(4,  20,              true); // 版本（制作方 2.0）
+    dv.setUint16(6,  cd.verNeeded,    true); // 版本（需求）
+    dv.setUint16(8,  0x0000,          true); // flags = 0
+    dv.setUint16(10, cd.method,       true); // 压缩方式
+    dv.setUint16(12, 0,               true); // 时间
+    dv.setUint16(14, 0,               true); // 日期
+    dv.setUint32(16, cd.crc,          true); // CRC-32
+    dv.setUint32(20, cd.compSize,     true); // 压缩大小
+    dv.setUint32(24, cd.origSize,     true); // 原始大小
+    dv.setUint16(28, cd.name.length,  true); // 文件名长度
+    dv.setUint16(30, 0,               true); // extra 长度 = 0
+    dv.setUint16(32, 0,               true); // 注释长度
+    dv.setUint16(34, 0,               true); // 磁盘编号
+    dv.setUint16(36, 0,               true); // 内部属性
+    dv.setUint32(38, 0,               true); // 外部属性
+    dv.setUint32(42, cd.offset,       true); // 本地头偏移
+    chunk.set(cd.name, 46);
+    return chunk;
+  });
+
+  /* EOCD（End of Central Directory）22 字节 */
+  const cdSize = cdChunks.reduce((s, c) => s + c.length, 0);
+  const eocd   = new Uint8Array(22);
+  const ev     = new DataView(eocd.buffer);
+  ev.setUint32(0,  0x06054b50,        true); // EOCD 签名
+  ev.setUint16(4,  0,                 true); // 磁盘编号
+  ev.setUint16(6,  0,                 true); // CD 起始磁盘
+  ev.setUint16(8,  cdEntries.length,  true); // 本磁盘条目数
+  ev.setUint16(10, cdEntries.length,  true); // 总条目数
+  ev.setUint32(12, cdSize,            true); // 中央目录大小
+  ev.setUint32(16, cdStart,           true); // 中央目录偏移
+  ev.setUint16(20, 0,                 true); // 注释长度
+
+  /* 拼接所有字节 */
+  const total = offset + cdSize + eocd.length;
+  const out   = new Uint8Array(total);
+  let pos = 0;
+  for (const p of localParts) { out.set(p, pos); pos += p.length; }
+  for (const c of cdChunks)   { out.set(c, pos); pos += c.length; }
+  out.set(eocd, pos);
+  return out;
+}
+
+/* ================================================
    导出 IDML（InDesign Markup Language）
    IDML 是 ZIP 压缩包，内含 XML，InDesign 2019+ 可直接打开
    坐标单位：点（pt），1mm = 2.834645pt
 ================================================ */
 async function exportIDML() {
-  if (typeof JSZip === 'undefined') {
-    toast('JSZip 库未加载，请检查网络后刷新');
-    return;
-  }
-
   const MM = 2.834645; // 1mm = 2.834645pt
   const pw = S.pageW * MM;   // 页宽（pt）
   const ph = S.pageH * MM;   // 页高（pt）
   const mg = S.pageMargin * MM; // 页边距（pt）
-
-  // InDesign坐标：以spread中心为原点，GeometricBounds=[top,left,bottom,right]
-  // 单页spread，页面左上角坐标=(0,0)
-  const pageTop    = 0;
-  const pageLeft   = 0;
-  const pageBottom = ph;
-  const pageRight  = pw;
 
   // 内容区（边距内）
   const cTop    = mg;
@@ -2068,39 +2204,44 @@ async function exportIDML() {
       layout: 'list-right', imgCount: 1 },
   ];
 
-  const zip = new JSZip();
+  // 使用自建 ZIP 构建器（完全控制每个字节，确保 IDML 合规）
+  const entries = [];
 
   /* ---- mimetype（必须第一个，不压缩） ---- */
-  zip.file('mimetype', 'application/vnd.adobe.indesign-idml-package', { compression: 'STORE' });
+  entries.push({ name: 'mimetype', data: 'application/vnd.adobe.indesign-idml-package' });
 
   /* ---- META-INF/container.xml ---- */
-  zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  entries.push({ name: 'META-INF/container.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
   <rootfiles>
     <rootfile full-path="designmap.xml" media-type="application/vnd.adobe.indesign-idml-package"/>
   </rootfiles>
-</container>`);
+</container>` });
 
   /* ---- XML/Tags.xml ---- */
-  zip.file('XML/Tags.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<idPkg:Tags xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0"></idPkg:Tags>`);
+  entries.push({ name: 'XML/Tags.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Tags xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0"></idPkg:Tags>` });
 
   /* ---- XML/BackingStory.xml ---- */
-  zip.file('XML/BackingStory.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  entries.push({ name: 'XML/BackingStory.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
   <XmlStory Self="rc_BACKING_STORY" AppliedTOCStyle="n" TrackChanges="false" StoryTitle="$ID/NullString">
     <StoryPreference OpticalMarginAlignment="false" OpticalMarginSize="12" FrameType="TextFrameType" StoryOrientation="Horizontal" StoryDirection="LeftToRightDirection"/>
     <InCopyExportOption IncludeGraphicProxies="true" IncludeAllResources="false"/>
   </XmlStory>
-</idPkg:Story>`);
+</idPkg:Story>` });
 
   /* ---- Resources/Fonts.xml（空文件，InDesign 自动处理字体） ---- */
-  zip.file('Resources/Fonts.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  entries.push({ name: 'Resources/Fonts.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <idPkg:Fonts xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
-</idPkg:Fonts>`);
+  <FontFamily Self="ff_msyh" Name="Microsoft YaHei">
+    <Font Self="ff_msyh_r" FontFamily="Microsoft YaHei" Name="Microsoft YaHei\tRegular" PostScriptName="MicrosoftYaHei" Status="Installed" FontStyleName="Regular" FontType="OpenType" FullName="Microsoft YaHei"/>
+    <Font Self="ff_msyh_b" FontFamily="Microsoft YaHei" Name="Microsoft YaHei\tBold"    PostScriptName="MicrosoftYaHei-Bold"   Status="Installed" FontStyleName="Bold"    FontType="OpenType" FullName="Microsoft YaHei Bold"/>
+  </FontFamily>
+</idPkg:Fonts>` });
 
   /* ---- Resources/Graphic.xml — 必须定义所有被 Styles/Frame 引用的颜色 ---- */
-  zip.file('Resources/Graphic.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  entries.push({ name: 'Resources/Graphic.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <idPkg:Graphic xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
   <ColorGroup Self="cg_default" Name="$ID/">
     <Color Self="Color/Black"              Name="Black"              Model="Process" Space="CMYK" ColorValue="0 0 0 100" IsSpot="false"/>
@@ -2113,19 +2254,19 @@ async function exportIDML() {
     <Color Self="Color/White"              Name="White"              Model="Process" Space="CMYK" ColorValue="0 0 0 0"   IsSpot="false"/>
     <Color Self="Color/None"               Name="$ID/None"           Model="Process" Space="CMYK" ColorValue="0 0 0 0"   IsSpot="false"/>
   </ColorGroup>
-</idPkg:Graphic>`);
+</idPkg:Graphic>` });
 
   /* ---- Resources/Preferences.xml ---- */
-  zip.file('Resources/Preferences.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  entries.push({ name: 'Resources/Preferences.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <idPkg:Preferences xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
   <DocumentPreference PageWidth="${pw.toFixed(3)}" PageHeight="${ph.toFixed(3)}" FacingPages="false" AllowPageShuffle="true" DocumentBleedTopOffset="0" DocumentBleedBottomOffset="0" DocumentBleedInsideOrLeftOffset="0" DocumentBleedOutsideOrRightOffset="0"/>
   <GridPreference BaselineStart="${mg.toFixed(3)}" BaselineDivision="14.4" BaselineGridShown="false" ColumnGuidesShown="true" DocumentGridShown="false"/>
   <MarginPreference Top="${mg.toFixed(3)}" Bottom="${mg.toFixed(3)}" Left="${mg.toFixed(3)}" Right="${mg.toFixed(3)}" ColumnCount="1" ColumnGutter="14.4"/>
   <PasteboardPreference PasteboardMargins="116.220472440945 116.220472440945" MinimumSpaceBetweenPages="28.3464566929134" PreviewBackgroundColor="Color/C=0 M=0 Y=0 K=15"/>
-</idPkg:Preferences>`);
+</idPkg:Preferences>` });
 
   /* ---- Resources/Styles.xml（段落样式） ---- */
-  zip.file('Resources/Styles.xml', buildStylesXML());
+  entries.push({ name: 'Resources/Styles.xml', data: buildStylesXML() });
 
   /* ---- 为每页生成 Spread + Story ---- */
   const spreadRefs = [];
@@ -2133,28 +2274,27 @@ async function exportIDML() {
   let   imgCounter = 0;
 
   pagesData.forEach((pd, pi) => {
-    const spreadId = `ub${pi}`;
-    const pageId   = `${spreadId}p`;
+    const spreadId    = `ub${pi}`;
+    const pageId      = `${spreadId}p`;
     const textStoryId = `st_${spreadId}_txt`;
     spreadRefs.push(spreadId);
 
-    // 生成该页所有文字框的 Story
-    const storyXML = buildStoryXML(textStoryId, pd);
-    zip.file(`Stories/Story_${textStoryId}.xml`, storyXML);
+    // 生成该页文字 Story
+    entries.push({ name: `Stories/Story_${textStoryId}.xml`, data: buildStoryXML(textStoryId, pd) });
     storyRefs.push(textStoryId);
 
-    // 生成 Spread XML（包含文字框 + 图片框）
-    const spreadXML = buildSpreadXML(spreadId, pageId, textStoryId, pd, pi, pw, ph, mg, cTop, cLeft, cBottom, cRight, cW, cH, imgCounter);
-    zip.file(`Spreads/Spread_${spreadId}.xml`, spreadXML);
+    // 生成 Spread（文字框 + 图片框）
+    entries.push({ name: `Spreads/Spread_${spreadId}.xml`, data: buildSpreadXML(spreadId, pageId, textStoryId, pd, pi, pw, ph, mg, cTop, cLeft, cBottom, cRight, cW, cH, imgCounter) });
     imgCounter += pd.imgCount;
   });
 
   /* ---- designmap.xml ---- */
-  zip.file('designmap.xml', buildDesignMap(spreadRefs, storyRefs, pw, ph, mg));
+  entries.push({ name: 'designmap.xml', data: buildDesignMap(spreadRefs, storyRefs, pw, ph, mg) });
 
   /* ---- 生成并下载 ---- */
   try {
-    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const zipBytes = await buildZipStore(entries);
+    const blob = new Blob([zipBytes], { type: 'application/zip' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     const projName = document.getElementById('proj-name')?.value || '景观设计';
@@ -2162,9 +2302,12 @@ async function exportIDML() {
     a.download = `${projName}.idml`;
     a.click();
     URL.revokeObjectURL(url);
+    // 调试输出：把第1页的 Story XML 打印到控制台，确认内容是否正确生成
     console.group('IDML Debug Output');
-    console.log('designmap.xml:');
-    console.log(buildDesignMap(spreadRefs, storyRefs, pw, ph, mg));
+    console.log('=== 第1页 Story XML ===');
+    console.log(buildStoryXML(storyRefs[0], pagesData[0]));
+    console.log('=== 第1页 Spread XML ===');
+    console.log(buildSpreadXML('ub0','ub0p',storyRefs[0],pagesData[0],0,pw,ph,mg,cTop,cLeft,cBottom,cRight,cW,cH,0));
     console.groupEnd();
     toast('IDML 已导出，在 InDesign 中直接打开即可');
   } catch(err) {
@@ -2184,16 +2327,21 @@ function buildDesignMap(spreadRefs, storyRefs, pw, ph, mg) {
   // StoryList：InDesign 用于枚举所有 Story 的必需属性
   const storyList = storyRefs.join(' ');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?aid style="50" type="document" readerVersion="6.0" featureSet="257" product="19.0(151)" ?>
 <Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"
   DOMVersion="19.0"
   Self="d"
   ActiveLayer="lyr1"
-  StoryList="${storyList}">
+  StoryList="${storyList}"
+  Name="landscape-design"
+  ZeroPoint="0 0">
   <idPkg:Fonts src="Resources/Fonts.xml"/>
   <idPkg:Styles src="Resources/Styles.xml"/>
   <idPkg:Preferences src="Resources/Preferences.xml"/>
   <idPkg:Graphic src="Resources/Graphic.xml"/>
-  <Layer Self="lyr1" Name="Layer 1" Visible="true" IsLocked="false"/>
+  <Layer Self="lyr1" Name="Layer 1" Visible="true" Locked="false"
+    IgnoreWrap="false" ShowGuides="true" LockGuides="false"
+    UI="true" Expendable="true" Printable="true"/>
 ${spreadsXML}
   <idPkg:BackingStory src="XML/BackingStory.xml"/>
   <idPkg:Tags src="XML/Tags.xml"/>
@@ -2205,39 +2353,57 @@ ${storiesXML}
    生成 Styles XML（段落样式）
 ================================================ */
 function buildStylesXML() {
+  // 参照真实 InDesign 19.0 导出格式：
+  // 1. CharacterStyle 必须用 "[No character style]"（带方括号）
+  // 2. ParagraphStyle 必须有 "[No paragraph style]" 根样式，它定义 FillColor="Color/Black"
+  //    这是文字颜色的来源——缺少此样式会导致文字透明
+  // 3. NormalParagraphStyle 的 BasedOn 必须在 <Properties> 子元素里指定
+  // 4. ObjectStyle 名称必须带方括号，如 "[Normal Text Frame]"
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
-  <RootParagraphStyleGroup Self="rootParagraphStyleGroup">
-    <ParagraphStyle Self="ps_NormalParagraphStyle" Name="$ID/NormalParagraphStyle"
-      BasedOn="" NextStyle="ps_NormalParagraphStyle"
-      FontStyle="Regular" PointSize="11" Leading="auto"
-      Composer="$ID/CJKComposer"/>
-    <ParagraphStyle Self="ps_chapter" Name="章节标签"
-      BasedOn="ps_NormalParagraphStyle" NextStyle="ps_NormalParagraphStyle"
-      FontStyle="Semibold" PointSize="9" Leading="14"
-      FillColor="Color/C=0 M=0 Y=0 K=60"/>
-    <ParagraphStyle Self="ps_title" Name="页面标题"
-      BasedOn="ps_NormalParagraphStyle" NextStyle="ps_NormalParagraphStyle"
-      FontStyle="Semibold" PointSize="20" Leading="28"
-      FillColor="Color/Black"/>
-    <ParagraphStyle Self="ps_body" Name="正文"
-      BasedOn="ps_NormalParagraphStyle" NextStyle="ps_NormalParagraphStyle"
-      FontStyle="Regular" PointSize="11" Leading="20"
-      FillColor="Color/C=0 M=0 Y=0 K=85"/>
-    <ParagraphStyle Self="ps_kw" Name="关键词"
-      BasedOn="ps_NormalParagraphStyle" NextStyle="ps_NormalParagraphStyle"
-      FontStyle="Semibold" PointSize="10" Leading="18"
-      FillColor="Color/C=0 M=0 Y=0 K=80"/>
-  </RootParagraphStyleGroup>
   <RootCharacterStyleGroup Self="rootCharacterStyleGroup">
-    <CharacterStyle Self="cs_NormalCharacterStyle" Name="$ID/NormalCharacterStyle"/>
+    <CharacterStyle Self="CharacterStyle/$ID/[No character style]" Name="$ID/[No character style]"/>
   </RootCharacterStyleGroup>
+  <RootParagraphStyleGroup Self="rootParagraphStyleGroup">
+    <!-- [No paragraph style] 是 InDesign 内置基础样式，定义默认黑色文字颜色 -->
+    <ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]"
+      Name="$ID/[No paragraph style]" FillColor="Color/Black">
+      <Properties>
+        <Leading type="enumeration">Auto</Leading>
+        <AppliedFont type="string">Microsoft YaHei</AppliedFont>
+      </Properties>
+    </ParagraphStyle>
+    <!-- NormalParagraphStyle 继承自 [No paragraph style] -->
+    <ParagraphStyle Self="ParagraphStyle/$ID/NormalParagraphStyle"
+      Name="$ID/NormalParagraphStyle"
+      NextStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+      <Properties>
+        <BasedOn type="string">$ID/[No paragraph style]</BasedOn>
+      </Properties>
+    </ParagraphStyle>
+  </RootParagraphStyleGroup>
   <RootTableStyleGroup Self="rootTableStyleGroup">
-    <TableStyle Self="TableStyle/$ID/NormalTableStyle" Name="$ID/NormalTableStyle"/>
+    <TableStyle Self="TableStyle/$ID/[No table style]" Name="$ID/[No table style]"/>
+    <TableStyle Self="TableStyle/$ID/[Basic Table]" Name="$ID/[Basic Table]">
+      <Properties><BasedOn type="string">$ID/[No table style]</BasedOn></Properties>
+    </TableStyle>
   </RootTableStyleGroup>
   <RootCellStyleGroup Self="rootCellStyleGroup">
-    <CellStyle Self="CellStyle/$ID/NormalCellStyle" Name="$ID/NormalCellStyle"/>
+    <CellStyle Self="CellStyle/$ID/[None]" Name="$ID/[None]"/>
   </RootCellStyleGroup>
+  <!-- ObjectStyle 必须用方括号格式，与 InDesign 内置样式名一致 -->
+  <RootObjectStyleGroup Self="rootObjectStyleGroup">
+    <ObjectStyle Self="ObjectStyle/$ID/[None]"                Name="$ID/[None]"/>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Graphics Frame]" Name="$ID/[Normal Graphics Frame]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Text Frame]"   Name="$ID/[Normal Text Frame]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Grid]"         Name="$ID/[Normal Grid]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+  </RootObjectStyleGroup>
 </idPkg:Styles>`;
 }
 
@@ -2269,15 +2435,49 @@ function buildStoryXML(storyId, pd) {
     });
   }
 
+  // 字体颜色映射（每种段落样式对应的CMYK颜色，必须在CharacterStyleRange上显式指定）
+  const styleColorMap = {
+    'chapter': 'Color/C=0 M=0 Y=0 K=60',
+    'title':   'Color/C=0 M=0 Y=0 K=100',
+    'body':    'Color/C=0 M=0 Y=0 K=85',
+    'kw':      'Color/C=0 M=0 Y=0 K=80',
+    'normal':  'Color/C=0 M=0 Y=0 K=100',
+  };
+  // 字体大小映射（单位：pt）
+  const styleSizeMap = {
+    'chapter': '9',
+    'title':   '24',
+    'body':    '18',
+    'kw':      '14',
+    'normal':  '18',
+  };
+
   // 构建 Story XML
+  // 关键规则：
+  // 1. 使用 InDesign 内置样式名 $ID/NormalParagraphStyle，避免自定义样式名称解析失败
+  // 2. <Br/> 必须放在单独的 CharacterStyleRange 内（与 InDesign 自身导出格式一致）
+  // 3. FillColor 在 CharacterStyleRange 上显式指定颜色
   const contentXML = lines.map(l => {
     const colonIdx = l.indexOf('>');
-    const styleTag = l.slice(0, colonIdx + 1);
     const text = l.slice(colonIdx + 1);
-    const styleName = styleTag.slice('<ParaStyle:'.length, -1);
-    return `    <ParagraphStyleRange AppliedParagraphStyle="ps_${styleNameToId(styleName)}">
-      <CharacterStyleRange AppliedCharacterStyle="cs_NormalCharacterStyle">
+    const styleName = l.slice('<ParaStyle:'.length, colonIdx);
+    const styleId = styleNameToId(styleName);
+    const fillColor = styleColorMap[styleId] || 'Color/C=0 M=0 Y=0 K=100';
+    const ptSize = styleSizeMap[styleId] || '18';
+    const isBold = (styleId === 'title' || styleId === 'kw');
+    const fontStyle = isBold ? 'Bold' : 'Regular';
+    // 字体必须放在 <Properties> 子元素里（InDesign 标准格式），不能作为属性
+    // AppliedCharacterStyle 用 "[No character style]"（带方括号，InDesign 内置名称）
+    return `    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"
+        FontStyle="${fontStyle}" PointSize="${ptSize}"
+        Leading="${Math.round(+ptSize * 1.5)}" FillColor="${fillColor}">
+        <Properties>
+          <AppliedFont type="string">Microsoft YaHei</AppliedFont>
+        </Properties>
         <Content>${text}</Content>
+      </CharacterStyleRange>
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
         <Br/>
       </CharacterStyleRange>
     </ParagraphStyleRange>`;
@@ -2321,15 +2521,15 @@ function buildSpreadXML(spreadId, pageId, textStoryId, pd, pageIndex, pw, ph, mg
     const textAreaW = bodyW - imgAreaW - 8;
     const textAreaLeft = bodyLeft + imgAreaW + 8;
     // 大图（左上65%高度）
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyTop + bodyH * 0.65, bodyLeft + imgAreaW, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyTop + bodyH * 0.65, bodyLeft + imgAreaW, spreadId, pw, ph));
     // 小图左（下35%，左半）
     const smallTop = bodyTop + bodyH * 0.65 + 4;
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, smallTop, bodyLeft, bodyBottom, bodyLeft + imgAreaW/2 - 2, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, smallTop, bodyLeft, bodyBottom, bodyLeft + imgAreaW/2 - 2, spreadId, pw, ph));
     // 小图右（下35%，右半）
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, smallTop, bodyLeft + imgAreaW/2 + 2, bodyBottom, bodyLeft + imgAreaW, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, smallTop, bodyLeft + imgAreaW/2 + 2, bodyBottom, bodyLeft + imgAreaW, spreadId, pw, ph));
     // 右侧文字框（复用 textStoryId 但单独帧）
     const rfId = `tf_${spreadId}_body`;
-    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId));
+    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId, pw, ph));
   } else if (layout === 'text-right-grid') {
     // 基地分析：3列2行网格+右侧文字
     const imgAreaW = bodyW * 0.67;
@@ -2341,64 +2541,64 @@ function buildSpreadXML(spreadId, pageId, textStoryId, pd, pageIndex, pw, ph, mg
     const row1H = bodyH * 0.58; const row2H = bodyH - row1H - gap;
     const row2Top = bodyTop + row1H + gap;
     // 大图（跨前2列，第1行）
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, col1, bodyTop + row1H, col1 + colW*2 + gap, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, col1, bodyTop + row1H, col1 + colW*2 + gap, spreadId, pw, ph));
     // 右侧文字覆盖区（第3列，第1行）- 文字框
     const rf2Id = `tf_${spreadId}_body`;
-    pageItems.push(buildTextFrame(rf2Id, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId));
+    pageItems.push(buildTextFrame(rf2Id, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId, pw, ph));
     // 第2行3个小图
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, row2Top, col1, bodyBottom, col1 + colW, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, row2Top, col2, bodyBottom, col2 + colW, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_4`, row2Top, col3, bodyBottom, col3 + colW, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, row2Top, col1, bodyBottom, col1 + colW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, row2Top, col2, bodyBottom, col2 + colW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_4`, row2Top, col3, bodyBottom, col3 + colW, spreadId, pw, ph));
   } else if (layout === 'text-left') {
     // 建筑分析：文字（左34%）+ 图片网格（右66%）
     const textAreaW = bodyW * 0.34;
     const imgAreaLeft = bodyLeft + textAreaW + 8;
     const imgW = bodyRight - imgAreaLeft;
     const rfId = `tf_${spreadId}_body`;
-    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, bodyLeft, bodyBottom, bodyLeft + textAreaW, spreadId));
+    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, bodyLeft, bodyBottom, bodyLeft + textAreaW, spreadId, pw, ph));
     // 图片网格：上大图（跨2列）+ 下2图
     const gap = 4;
     const col1 = imgAreaLeft; const col2 = imgAreaLeft + imgW/2 + gap/2;
     const colW = imgW/2 - gap/2;
     const row1H = bodyH * 0.57;
     const row2Top = bodyTop + row1H + gap;
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, imgAreaLeft, bodyTop + row1H, bodyRight, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, row2Top, col1, bodyBottom, col1 + colW, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, row2Top, col2, bodyBottom, col2 + colW, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, imgAreaLeft, bodyTop + row1H, bodyRight, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, row2Top, col1, bodyBottom, col1 + colW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, row2Top, col2, bodyBottom, col2 + colW, spreadId, pw, ph));
   } else if (layout === 'grid-overlay') {
     // 灵感来源：2x2图片网格 + 中央浮动文字框
     const gap = 6;
     const halfW = (bodyW - gap) / 2;
     const halfH = (bodyH - gap) / 2;
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyTop + halfH, bodyLeft + halfW, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, bodyTop, bodyLeft + halfW + gap, bodyTop + halfH, bodyRight, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, bodyTop + halfH + gap, bodyLeft, bodyBottom, bodyLeft + halfW, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_4`, bodyTop + halfH + gap, bodyLeft + halfW + gap, bodyBottom, bodyRight, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyTop + halfH, bodyLeft + halfW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, bodyTop, bodyLeft + halfW + gap, bodyTop + halfH, bodyRight, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, bodyTop + halfH + gap, bodyLeft, bodyBottom, bodyLeft + halfW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_4`, bodyTop + halfH + gap, bodyLeft + halfW + gap, bodyBottom, bodyRight, spreadId, pw, ph));
     // 中央文字叠加框
     const ovW = bodyW * 0.44; const ovH = bodyH * 0.4;
     const ovLeft = bodyLeft + (bodyW - ovW) / 2;
     const ovTop  = bodyTop  + (bodyH - ovH) / 2;
     const rfId = `tf_${spreadId}_overlay`;
-    pageItems.push(buildTextFrame(rfId, textStoryId, ovTop, ovLeft, ovTop + ovH, ovLeft + ovW, spreadId));
+    pageItems.push(buildTextFrame(rfId, textStoryId, ovTop, ovLeft, ovTop + ovH, ovLeft + ovW, spreadId, pw, ph));
   } else if (layout === 'text-top') {
     // 设计理念：正文在上 + 下方左大图+右2图
     const textH = bodyH * 0.28;
     const imgTop = bodyTop + textH + 6;
     const rfId = `tf_${spreadId}_body`;
-    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, bodyLeft, bodyTop + textH, bodyRight, spreadId));
+    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, bodyLeft, bodyTop + textH, bodyRight, spreadId, pw, ph));
     const imgW_left = bodyW * 0.58; const imgW_right = bodyW - imgW_left - 6;
     const rightLeft = bodyLeft + imgW_left + 6;
     const halfH = (bodyH - textH - 6 - 4) / 2;
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, imgTop, bodyLeft, bodyBottom, bodyLeft + imgW_left, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, imgTop, rightLeft, imgTop + halfH, bodyRight, spreadId));
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, imgTop + halfH + 4, rightLeft, bodyBottom, bodyRight, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, imgTop, bodyLeft, bodyBottom, bodyLeft + imgW_left, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, imgTop, rightLeft, imgTop + halfH, bodyRight, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, imgTop + halfH + 4, rightLeft, bodyBottom, bodyRight, spreadId, pw, ph));
   } else if (layout === 'list-right') {
     // 主题落位：大图（左65%）+ 分区列表文字（右35%）
     const imgAreaW = bodyW * 0.63;
     const textAreaLeft = bodyLeft + imgAreaW + 8;
-    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyBottom, bodyLeft + imgAreaW, spreadId));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyBottom, bodyLeft + imgAreaW, spreadId, pw, ph));
     const rfId = `tf_${spreadId}_body`;
-    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId));
+    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId, pw, ph));
   }
 
   const pageItemsXML = pageItems.join('\n');
@@ -2407,7 +2607,10 @@ function buildSpreadXML(spreadId, pageId, textStoryId, pd, pageIndex, pw, ph, mg
 <idPkg:Spread xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
   <Spread Self="${spreadId}" PageCount="1" BindingLocation="0" AllowPageShuffle="true">
     <FlattenerPreference LineArtAndTextResolution="300" GradientAndMeshResolution="150" ClipComplexRegions="false" ConvertAllStrokesToOutlines="false" ConvertAllTextToOutlines="false"/>
-    <Page Self="${pageId}" MasterPageTransform="1 0 0 1 0 0" Name="${pageIndex + 1}" AppliedMaster="n" GeometricBounds="${(0).toFixed(3)} ${(0).toFixed(3)} ${ph.toFixed(3)} ${pw.toFixed(3)}" ItemTransform="1 0 0 1 0 0">
+    <!-- 页面中心在 Spread(0,0)，ItemTransform = -pw/2, -ph/2（真实 InDesign 导出格式） -->
+    <Page Self="${pageId}" MasterPageTransform="1 0 0 1 0 0" Name="${pageIndex + 1}" AppliedMaster="n"
+      GeometricBounds="0 0 ${ph.toFixed(3)} ${pw.toFixed(3)}"
+      ItemTransform="1 0 0 1 ${(-pw/2).toFixed(3)} ${(-ph/2).toFixed(3)}">
       <MarginPreference Top="${mg.toFixed(3)}" Bottom="${mg.toFixed(3)}" Left="${mg.toFixed(3)}" Right="${mg.toFixed(3)}" ColumnCount="1" ColumnGutter="14.4"/>
     </Page>
 ${pageItemsXML}
@@ -2416,29 +2619,317 @@ ${pageItemsXML}
 }
 
 /* ---- 创建文字框 ---- */
-function buildTextFrame(selfId, storyId, top, left, bottom, right, spreadId) {
-  const w = right - left; const h = bottom - top;
+// top/left/bottom/right：页面坐标（mm×2.834645，原点=页面左上角）
+// pw/ph：页面尺寸（pt）
+// InDesign 坐标系：页面中心在 Spread(0,0)，ItemTransform 指向帧中心
+// 帧中心在 Spread 的坐标 = 页面坐标中心 - 页面尺寸的一半
+function buildTextFrame(selfId, storyId, top, left, bottom, right, spreadId, pw, ph) {
+  const w  = right - left;
+  const h  = bottom - top;
+  const hw = (w / 2).toFixed(3);
+  const hh = (h / 2).toFixed(3);
+  // 帧中心在 Spread 的坐标
+  const cx = ((left + right) / 2 - pw / 2).toFixed(3);
+  const cy = ((top + bottom) / 2 - ph / 2).toFixed(3);
   return `    <TextFrame Self="${selfId}" ParentStory="${storyId}" PreviousTextFrame="n" NextTextFrame="n"
-      ContentType="TextType" AppliedObjectStyle="ObjectStyle/$ID/NormalObjectStyle"
-      GradientFillLength="0" GradientFillAngle="0"
-      ItemTransform="1 0 0 1 ${left.toFixed(3)} ${top.toFixed(3)}"
-      GeometricBounds="${(0).toFixed(3)} ${(0).toFixed(3)} ${h.toFixed(3)} ${w.toFixed(3)}"
+      ContentType="TextType" AppliedObjectStyle="ObjectStyle/$ID/[Normal Text Frame]"
+      ItemTransform="1 0 0 1 ${cx} ${cy}"
       ItemLayer="lyr1">
-      <TextFramePreference TextColumnCount="1" TextColumnGutter="14.4"
-        InsetSpacing="0 0 0 0" VerticalJustification="TopAlign"/>
+      <Properties>
+        <PathGeometry>
+          <GeometryPathType PathOpen="false">
+            <PathPointArray>
+              <PathPointType Anchor="-${hw} -${hh}" LeftDirection="-${hw} -${hh}" RightDirection="-${hw} -${hh}"/>
+              <PathPointType Anchor="-${hw} ${hh}"  LeftDirection="-${hw} ${hh}"  RightDirection="-${hw} ${hh}"/>
+              <PathPointType Anchor="${hw} ${hh}"   LeftDirection="${hw} ${hh}"   RightDirection="${hw} ${hh}"/>
+              <PathPointType Anchor="${hw} -${hh}"  LeftDirection="${hw} -${hh}"  RightDirection="${hw} -${hh}"/>
+            </PathPointArray>
+          </GeometryPathType>
+        </PathGeometry>
+      </Properties>
+      <TextFramePreference TextColumnCount="1" TextColumnGutter="14.173"
+        VerticalJustification="TopAlign" FirstBaselineOffset="EmboxHeight">
+        <Properties>
+          <InsetSpacing type="list">
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+          </InsetSpacing>
+        </Properties>
+      </TextFramePreference>
     </TextFrame>`;
 }
 
-/* ---- 创建图片框（空占位，不含 Image 子元素，InDesign 中可直接置入图片） ---- */
-function buildGraphicFrame(selfId, top, left, bottom, right, spreadId) {
-  const w = right - left; const h = bottom - top;
+/* ---- 创建图片框（空占位，InDesign 中可直接置入图片） ---- */
+// 坐标系同 buildTextFrame：页面中心在 Spread(0,0)，ItemTransform 指向帧中心
+function buildGraphicFrame(selfId, top, left, bottom, right, spreadId, pw, ph) {
+  const w  = right - left;
+  const h  = bottom - top;
+  const hw = (w / 2).toFixed(3);
+  const hh = (h / 2).toFixed(3);
+  const cx = ((left + right) / 2 - pw / 2).toFixed(3);
+  const cy = ((top + bottom) / 2 - ph / 2).toFixed(3);
   return `    <Rectangle Self="${selfId}"
-      ContentType="GraphicType" AppliedObjectStyle="ObjectStyle/$ID/NormalObjectStyle"
-      ItemTransform="1 0 0 1 ${left.toFixed(3)} ${top.toFixed(3)}"
-      GeometricBounds="${(0).toFixed(3)} ${(0).toFixed(3)} ${h.toFixed(3)} ${w.toFixed(3)}"
-      StrokeWeight="1" StrokeColor="Color/C=0 M=0 Y=0 K=15"
-      FillColor="Color/None"
-      ItemLayer="lyr1"/>`;
+      ContentType="GraphicType" AppliedObjectStyle="ObjectStyle/$ID/[Normal Graphics Frame]"
+      StrokeWeight="1" StrokeColor="Color/C=0 M=0 Y=0 K=15" FillColor="Color/None"
+      ItemTransform="1 0 0 1 ${cx} ${cy}"
+      ItemLayer="lyr1">
+      <Properties>
+        <PathGeometry>
+          <GeometryPathType PathOpen="false">
+            <PathPointArray>
+              <PathPointType Anchor="-${hw} -${hh}" LeftDirection="-${hw} -${hh}" RightDirection="-${hw} -${hh}"/>
+              <PathPointType Anchor="-${hw} ${hh}"  LeftDirection="-${hw} ${hh}"  RightDirection="-${hw} ${hh}"/>
+              <PathPointType Anchor="${hw} ${hh}"   LeftDirection="${hw} ${hh}"   RightDirection="${hw} ${hh}"/>
+              <PathPointType Anchor="${hw} -${hh}"  LeftDirection="${hw} -${hh}"  RightDirection="${hw} -${hh}"/>
+            </PathPointArray>
+          </GeometryPathType>
+        </PathGeometry>
+      </Properties>
+    </Rectangle>`;
+}
+
+/* ================================================
+   最小化 IDML 测试（用于诊断 InDesign 是否能打开任何 IDML）
+   这个函数生成绝对最简单的合法 IDML：
+   一页 A3 横向空白文档，只有一行英文文字，无任何自定义样式
+   如果这个文件也无法打开 → 问题在 JSZip 或 InDesign 安装
+   如果这个文件可以打开  → 问题在完整版 XML 的某个细节
+================================================ */
+async function testMinimalIDML() {
+  const MM = 2.834645;
+  const pwN = 420 * MM, phN = 297 * MM, mgN = 20 * MM;
+  const pw = pwN.toFixed(3); // 1190.551pt（A3横向宽）
+  const ph = phN.toFixed(3); // 841.890pt（A3横向高）
+  const mg = mgN.toFixed(3); // 56.693pt（边距）
+  // 文字框从边距到对边（全内容区）
+  // 帧中心在页面中心 = pwN/2, phN/2；在Spread坐标系中心减去页面半尺寸 = (0, 0)
+  const tfCX = '0';                            // 文字框中心 Spread X = pwN/2 - pwN/2
+  const tfCY = '0';                            // 文字框中心 Spread Y = phN/2 - phN/2
+  const tfHW = ((pwN - 2*mgN)/2).toFixed(3);  // 文字框半宽
+  const tfHH = ((phN - 2*mgN)/2).toFixed(3);  // 文字框半高
+
+  const entries = [];
+
+  // 1. mimetype（必须第一个、不压缩）
+  entries.push({ name: 'mimetype', data: 'application/vnd.adobe.indesign-idml-package' });
+
+  // 2. META-INF/container.xml
+  entries.push({ name: 'META-INF/container.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="designmap.xml" media-type="application/vnd.adobe.indesign-idml-package"/>
+  </rootfiles>
+</container>` });
+
+  // 3. XML/Tags.xml
+  entries.push({ name: 'XML/Tags.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Tags xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+</idPkg:Tags>` });
+
+  // 4. XML/BackingStory.xml
+  entries.push({ name: 'XML/BackingStory.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <XmlStory Self="u_bs" AppliedTOCStyle="n" TrackChanges="false" StoryTitle="$ID/NullString">
+    <StoryPreference OpticalMarginAlignment="false" OpticalMarginSize="12" FrameType="TextFrameType" StoryOrientation="Horizontal" StoryDirection="LeftToRightDirection"/>
+    <InCopyExportOption IncludeGraphicProxies="true" IncludeAllResources="false"/>
+  </XmlStory>
+</idPkg:Story>` });
+
+  // 5. Resources/Fonts.xml（空）
+  entries.push({ name: 'Resources/Fonts.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Fonts xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+</idPkg:Fonts>` });
+
+  // 6. Resources/Graphic.xml - 颜色 Self ID 用 InDesign 标准格式 "Color/Black"
+  entries.push({ name: 'Resources/Graphic.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Graphic xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <ColorGroup Self="u_cg" Name="$ID/">
+    <Color Self="Color/Black" Name="Black" Model="Process" Space="CMYK" ColorValue="0 0 0 100" IsSpot="false"/>
+    <Color Self="Color/None"  Name="$ID/None" Model="Process" Space="CMYK" ColorValue="0 0 0 0" IsSpot="false"/>
+  </ColorGroup>
+</idPkg:Graphic>` });
+
+  // 7. Resources/Styles.xml - 完全匹配真实 InDesign 导出格式：
+  //   - "[No paragraph style]" 根样式定义 FillColor="Color/Black"（文字颜色来源）
+  //   - "[No character style]" 是 InDesign 内置必需样式名（带方括号）
+  //   - ObjectStyle 名称带方括号
+  entries.push({ name: 'Resources/Styles.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <RootCharacterStyleGroup Self="u_csg">
+    <CharacterStyle Self="CharacterStyle/$ID/[No character style]" Name="$ID/[No character style]"/>
+  </RootCharacterStyleGroup>
+  <RootParagraphStyleGroup Self="u_psg">
+    <ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]"
+      Name="$ID/[No paragraph style]" FillColor="Color/Black">
+      <Properties>
+        <Leading type="enumeration">Auto</Leading>
+      </Properties>
+    </ParagraphStyle>
+    <ParagraphStyle Self="ParagraphStyle/$ID/NormalParagraphStyle"
+      Name="$ID/NormalParagraphStyle" NextStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+      <Properties>
+        <BasedOn type="string">$ID/[No paragraph style]</BasedOn>
+      </Properties>
+    </ParagraphStyle>
+  </RootParagraphStyleGroup>
+  <RootTableStyleGroup Self="u_tsg">
+    <TableStyle Self="TableStyle/$ID/[No table style]" Name="$ID/[No table style]"/>
+  </RootTableStyleGroup>
+  <RootCellStyleGroup Self="u_cellsg">
+    <CellStyle Self="CellStyle/$ID/[None]" Name="$ID/[None]"/>
+  </RootCellStyleGroup>
+  <RootObjectStyleGroup Self="u_osg">
+    <ObjectStyle Self="ObjectStyle/$ID/[None]"                Name="$ID/[None]"/>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Text Frame]"   Name="$ID/[Normal Text Frame]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Graphics Frame]" Name="$ID/[Normal Graphics Frame]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Grid]"         Name="$ID/[Normal Grid]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+  </RootObjectStyleGroup>
+</idPkg:Styles>` });
+
+  // 8. Resources/Preferences.xml
+  entries.push({ name: 'Resources/Preferences.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Preferences xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <DocumentPreference PageWidth="${pw}" PageHeight="${ph}" FacingPages="false" AllowPageShuffle="true" DocumentBleedTopOffset="0" DocumentBleedBottomOffset="0" DocumentBleedInsideOrLeftOffset="0" DocumentBleedOutsideOrRightOffset="0"/>
+  <MarginPreference Top="${mg}" Bottom="${mg}" Left="${mg}" Right="${mg}" ColumnCount="1" ColumnGutter="14.4"/>
+</idPkg:Preferences>` });
+
+  // 9. Stories/Story_u_s1.xml
+  // 字体放在 <Properties> 子元素，AppliedCharacterStyle 用 "[No character style]"
+  entries.push({ name: 'Stories/Story_u_s1.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <Story Self="u_s1" AppliedTOCStyle="n" TrackChanges="false" StoryTitle="Test">
+    <StoryPreference OpticalMarginAlignment="false" OpticalMarginSize="12" FrameType="TextFrameType" StoryOrientation="Horizontal" StoryDirection="LeftToRightDirection"/>
+    <InCopyExportOption IncludeGraphicProxies="true" IncludeAllResources="false"/>
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"
+        PointSize="24" Leading="32">
+        <Content>Hello InDesign - Test</Content>
+      </CharacterStyleRange>
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
+        <Br/>
+      </CharacterStyleRange>
+    </ParagraphStyleRange>
+  </Story>
+</idPkg:Story>` });
+
+  // 10. Spreads/Spread_u_sp1.xml
+  // Page ItemTransform = -pw/2, -ph/2（真实 InDesign 格式：页面中心在 Spread 原点）
+  // TextFrame 使用 PathGeometry，ItemTransform 指向帧中心
+  entries.push({ name: 'Spreads/Spread_u_sp1.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Spread xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <Spread Self="u_sp1" PageCount="1" BindingLocation="0" AllowPageShuffle="true">
+    <FlattenerPreference LineArtAndTextResolution="300" GradientAndMeshResolution="150" ClipComplexRegions="false" ConvertAllStrokesToOutlines="false" ConvertAllTextToOutlines="false"/>
+    <Page Self="u_pg1" Name="1" AppliedMaster="n"
+      MasterPageTransform="1 0 0 1 0 0"
+      GeometricBounds="0 0 ${ph} ${pw}"
+      ItemTransform="1 0 0 1 ${(-pwN/2).toFixed(3)} ${(-phN/2).toFixed(3)}">
+      <MarginPreference Top="${mg}" Bottom="${mg}" Left="${mg}" Right="${mg}" ColumnCount="1" ColumnGutter="14.4"/>
+    </Page>
+    <TextFrame Self="u_tf1" ParentStory="u_s1" PreviousTextFrame="n" NextTextFrame="n"
+      ContentType="TextType" AppliedObjectStyle="ObjectStyle/$ID/[Normal Text Frame]"
+      ItemTransform="1 0 0 1 ${tfCX} ${tfCY}"
+      ItemLayer="u_lyr1">
+      <Properties>
+        <PathGeometry>
+          <GeometryPathType PathOpen="false">
+            <PathPointArray>
+              <PathPointType Anchor="-${tfHW} -${tfHH}" LeftDirection="-${tfHW} -${tfHH}" RightDirection="-${tfHW} -${tfHH}"/>
+              <PathPointType Anchor="-${tfHW} ${tfHH}"  LeftDirection="-${tfHW} ${tfHH}"  RightDirection="-${tfHW} ${tfHH}"/>
+              <PathPointType Anchor="${tfHW} ${tfHH}"   LeftDirection="${tfHW} ${tfHH}"   RightDirection="${tfHW} ${tfHH}"/>
+              <PathPointType Anchor="${tfHW} -${tfHH}"  LeftDirection="${tfHW} -${tfHH}"  RightDirection="${tfHW} -${tfHH}"/>
+            </PathPointArray>
+          </GeometryPathType>
+        </PathGeometry>
+      </Properties>
+      <TextFramePreference TextColumnCount="1" TextColumnGutter="14.173"
+        VerticalJustification="TopAlign" FirstBaselineOffset="EmboxHeight">
+        <Properties>
+          <InsetSpacing type="list">
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+          </InsetSpacing>
+        </Properties>
+      </TextFramePreference>
+    </TextFrame>
+  </Spread>
+</idPkg:Spread>` });
+
+  // 11. designmap.xml
+  // 关键：必须有 <?aid?> 处理指令，InDesign 用它识别 IDML 包的文档类型
+  // FeatureSet 放在 <?aid?> 里，不是 Document 属性（来自真实 InDesign 导出对比）
+  entries.push({ name: 'designmap.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?aid style="50" type="document" readerVersion="6.0" featureSet="257" product="19.0(151)" ?>
+<Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"
+  DOMVersion="19.0" Self="d" ActiveLayer="u_lyr1" StoryList="u_s1"
+  Name="untitled-1" ZeroPoint="0 0">
+  <idPkg:Fonts src="Resources/Fonts.xml"/>
+  <idPkg:Styles src="Resources/Styles.xml"/>
+  <idPkg:Preferences src="Resources/Preferences.xml"/>
+  <idPkg:Graphic src="Resources/Graphic.xml"/>
+  <Layer Self="u_lyr1" Name="Layer 1" Visible="true" Locked="false"
+    IgnoreWrap="false" ShowGuides="true" LockGuides="false"
+    UI="true" Expendable="true" Printable="true"/>
+  <idPkg:Spread src="Spreads/Spread_u_sp1.xml"/>
+  <idPkg:BackingStory src="XML/BackingStory.xml"/>
+  <idPkg:Tags src="XML/Tags.xml"/>
+  <idPkg:Story src="Stories/Story_u_s1.xml"/>
+</Document>` });
+
+  try {
+    const zipBytes = await buildZipStore(entries);
+
+    /* ---- 诊断：输出 ZIP 头字节到控制台，供开发者分析 ---- */
+    const hexLines = [];
+    for (let i = 0; i < Math.min(zipBytes.length, 256); i += 16) {
+      const slice = zipBytes.slice(i, i + 16);
+      const hex  = Array.from(slice).map(b => b.toString(16).padStart(2,'0').toUpperCase()).join(' ');
+      const ascii = Array.from(slice).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
+      hexLines.push(`${String(i).padStart(4,'0')}: ${hex.padEnd(47)}  ${ascii}`);
+    }
+    console.group('=== IDML ZIP 诊断输出（请截图或复制发给开发者）===');
+    console.log('文件总大小:', zipBytes.length, '字节');
+    console.log('前4字节签名（正确应为 50 4B 03 04）:',
+      Array.from(zipBytes.slice(0,4)).map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' '));
+    console.log('第27-28字节 extra field 长度（应为 00 00）:',
+      Array.from(zipBytes.slice(28,30)).map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' '));
+    console.log('文件名区（第30字节起，应为 "mimetype"）:',
+      String.fromCharCode(...zipBytes.slice(30, 38)));
+    console.log('\n--- 完整 HEX DUMP（前256字节）---');
+    console.log(hexLines.join('\n'));
+    console.groupEnd();
+
+    const blob = new Blob([zipBytes], { type: 'application/zip' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'test_minimal.idml';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('已导出 + 在 F12 控制台输出诊断信息');
+  } catch(e) {
+    toast('生成失败：' + e.message);
+    console.error(e);
+  }
 }
 
 /* ================================================
