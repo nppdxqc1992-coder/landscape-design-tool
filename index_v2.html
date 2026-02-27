@@ -158,22 +158,6 @@ html, body {
 .msg-thinking .dots::after { content: '...'; animation: blink 1s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
-/* ---- 应用结果区（消息下方） ---- */
-.applied-result {
-  margin: 0 20px 12px; padding: 12px; background: #f0fdf4;
-  border: 1px solid #bbf7d0; border-radius: var(--radius);
-}
-.applied-result-title { font-size: 11px; font-weight: 600; color: var(--green); margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
-.applied-result-title::before { content: '✓'; width: 16px; height: 16px; background: var(--green); color: #fff; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
-.applied-field { margin-bottom: 6px; }
-.applied-field:last-child { margin-bottom: 0; }
-.applied-field label { font-size: 10px; color: var(--text-2); display: block; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.3px; }
-.applied-field input, .applied-field textarea {
-  width: 100%; border: 1px solid var(--border); border-radius: 6px;
-  padding: 5px 8px; font-size: 12px; font-family: inherit; color: var(--text-1);
-  background: #fff; outline: none; resize: vertical; line-height: 1.6;
-}
-.applied-field textarea { min-height: 60px; }
 
 /* ---- 底部输入区 ---- */
 .chat-input-area {
@@ -506,11 +490,6 @@ html, body {
         </div>
       </div>
 
-      <!-- 已应用内容 -->
-      <div id="applied-analysis" style="display:none">
-        <div class="applied-result" id="applied-analysis-content"></div>
-      </div>
-
       <!-- 输入区 -->
       <div class="chat-input-area">
         <div class="chat-input-wrap">
@@ -538,10 +517,6 @@ html, body {
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           <p>描述场地核心问题<br>AI 将推导对应的景观策略<br><br>如不需要此章节，可在项目信息页取消勾选</p>
         </div>
-      </div>
-
-      <div id="applied-strategy" style="display:none">
-        <div class="applied-result" id="applied-strategy-content"></div>
       </div>
 
       <div class="chat-input-area">
@@ -578,9 +553,6 @@ html, body {
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
             <p>描述你的设计灵感方向<br>或发送「生成设计构思」让 AI 自由发挥<br>多轮对话直到满意为止</p>
           </div>
-        </div>
-        <div id="applied-concept" style="display:none">
-          <div class="applied-result" id="applied-concept-content"></div>
         </div>
         <div class="chat-input-area">
           <div class="chat-input-wrap">
@@ -790,37 +762,24 @@ function switchScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(`screen-${name}`).classList.add('active');
 
-  // 切换到章节页时，若已有生成内容，自动更新已应用区域 + 激活按钮
+  if (name === 'analysis') {
+    switchAnalysisTab(S.analysisTab);
+    return;
+  }
+
   if (name === 'strategy' || name === 'concept') {
     syncAppliedUI(name);
-  }
-  if (name === 'analysis') {
-    // 强制重进当前子标签，刷新 chat 和 applied 区域
-    switchAnalysisTab(S.analysisTab);
-    return; // switchAnalysisTab 内部会调用 updatePreview
   }
 
   updatePreview(name);
 }
 
-/* 同步某章节的"已应用"展示区和按钮状态 */
+/* 同步按钮状态：有 AI 回复即可点"应用到预览" */
 function syncAppliedUI(chapter) {
-  const key  = chapter === 'analysis' ? S.analysisTab : chapter;
-  const data = S.applied[key];
-  if (!data) return;
-
-  const container = document.getElementById(`applied-${chapter}`);
-  const contentEl = document.getElementById(`applied-${chapter}-content`);
-  if (container && contentEl) {
-    container.style.display = 'block';
-    const preview = (data.content || '').slice(0, 100) + (data.content?.length > 100 ? '…' : '');
-    contentEl.innerHTML = `
-      <div class="applied-result-title">已生成 · ${data.title || ''}</div>
-      <div style="font-size:12px;color:var(--text-2);line-height:1.7;">${preview}</div>`;
-  }
-  // 如果有 rawResponse，激活应用按钮（供用户重新对话后再次应用）
+  const key = chapter === 'analysis' ? S.analysisTab : chapter;
+  const hasChat = S.chats[key]?.some(m => m.role === 'assistant');
   const applyBtn = document.getElementById(`apply-${chapter}`);
-  if (applyBtn && S.rawResponses[key]) applyBtn.disabled = false;
+  if (applyBtn) applyBtn.disabled = !hasChat;
 }
 
 /* ============================================================
@@ -842,8 +801,11 @@ const ANALYSIS_EMPTY = {
 
 function switchAnalysisTab(tab) {
   const chatEl = document.getElementById('chat-analysis');
-  // 保存当前子标签的聊天 DOM
-  S.chatHTML[S.analysisTab] = chatEl.innerHTML;
+  // 只在子标签之间切换时保存当前 DOM（tab !== S.analysisTab）
+  // 初次进入分析页时 tab === S.analysisTab，不保存，避免空白 DOM 覆盖一键生成的内容
+  if (tab !== S.analysisTab) {
+    S.chatHTML[S.analysisTab] = chatEl.innerHTML;
+  }
 
   S.analysisTab = tab;
   ANALYSIS_TABS.forEach(t => {
@@ -866,8 +828,9 @@ function switchAnalysisTab(tab) {
   // 同步已应用区域
   syncAppliedUI('analysis');
 
-  // 按钮状态
-  document.getElementById('apply-analysis').disabled = !S.rawResponses[tab];
+  // 按钮状态：有 AI 回复即可点"应用到预览"
+  const hasAIReply = S.chats[tab]?.some(m => m.role === 'assistant');
+  document.getElementById('apply-analysis').disabled = !hasAIReply;
 
   updatePreview('analysis');
 }
@@ -971,13 +934,10 @@ async function sendToAI(chapter, userText) {
     S.chats[key].push({ role: 'user',      content: userText });
     S.chats[key].push({ role: 'assistant', content: raw });
 
-    // 标记该章节有对话内容（具体提取在点击「应用到预览」时进行）
-    S.rawResponses[key] = 'pending';
-
     // 直接展示 AI 的完整回复（支持 Markdown）
     addMsg(chapter, 'ai', raw);
 
-    // 激活应用按钮
+    // 有 AI 回复即可点"应用到预览"
     const applyBtn = document.getElementById(`apply-${chapter}`);
     if (applyBtn) applyBtn.disabled = false;
 
@@ -1089,25 +1049,48 @@ ${projBlock}${rawBlock}`;
 
 区位分析的价值：向读者（甲方、评审）阐明项目所处的宏观区位优势、交通便利性、周边配套资源及城市发展价值，为整个方案建立"选址有眼光"的认知基础。
 
-好的区位分析不只是罗列数据，而是讲清楚"这里为什么值得"。请从原始资料中提炼关键信息，如资料不足可结合项目地点的实际情况进行专业推断，语言客观有据，适当体现区位价值主张。`,
+好的区位分析不只是罗列数据，而是讲清楚"这里为什么值得"。请从原始资料中提炼关键信息，如资料不足可结合项目地点的实际情况进行专业推断，语言客观有据，适当体现区位价值主张。
+
+**【输出格式要求——必须遵守】**
+直接用 1-4 个编号要点输出，每点格式：
+1. 简短标题（3-6字，点明这条价值的核心）
+正文（精炼，说清楚就行，不要堆砌形容词）
+
+禁止输出前言（如"好的，我来…"）和结尾确认（如"您看是否合适？"），直接给要点内容。`,
 
     site: `\n\n**当前章节：场地现状**
 
 场地现状分析是设计"有的放矢"的依据。核心是客观呈现地块现有条件——地形地貌、水系植被、周边界面、现状资源与制约——并从中挖掘设计机遇。
 
-好的场地分析不只说"现状是什么"，更要传递"这些条件对设计意味着什么"。三面环水是机遇，西侧噪音是挑战，农田界面是特色——这些都是后续设计策略的出发点，请帮助设计师把这层逻辑讲清楚。`,
+**【输出格式要求——必须遵守】**
+直接用 1-4 个编号要点输出，每点格式：
+1. 简短标题（3-6字，点明场地特色或价值）
+正文（精炼，重点说明特色与价值，文字尽量精简，不改变本意）
+
+禁止输出前言和结尾确认，直接给要点内容。`,
 
     building: `\n\n**当前章节：建筑分析**
 
-建筑分析帮助读者理解景观设计与建筑的关系——建筑风格如何影响景观语言的选择？建筑布局创造了哪些景观机遇（如架空层、退让空间、视线通廊）？建筑产品类型（高层/别墅/洋房）对景观设计有哪些不同诉求？
+建筑分析帮助读者快速了解建筑产品特征，为景观设计语言的选择提供依据。
 
-请从原始资料中提炼建筑风格定位、产品业态、户型赠送空间、立面材质等信息，分析它们对景观设计的指导意义。如发现建筑布局存在景观难点（如长巷道、密度过高），也请指出并提供解决思路。`,
+**【输出格式要求——必须遵守】**
+说清楚建筑的颜色、风格、排布、调性等关键信息，整体控制在 30 字以内，简练准确。
+不要分点，不要展开分析，禁止输出前言和结尾确认，直接一段话给出。`,
 
     general: `\n\n**当前章节：工程概况**
 
-工程概况是文本的"数据名片"，需要客观准确地呈现项目基本规划指标。请从原始资料中提取：用地面积、建筑面积、景观面积、绿化率、容积率、建筑密度、停车位等关键数据。
+工程概况需要准确呈现项目关键规划指标，让读者快速了解项目规模。
 
-如某项数据资料中未明确提及，请注明"待确认"或根据同类项目合理估算并标注。概况文字部分简明扼要，让读者快速了解项目规模与定位。`,
+**【输出格式要求——必须遵守】**
+只列关键数据，每行一条，严格格式：数据名：数值（含单位）
+
+示例：
+红线面积：约 12000㎡
+建筑面积：约 35000㎡
+景观面积：约 8500㎡
+绿化率：35%
+
+不加任何标注符号（★●■等），不加说明文字，禁止输出前言和结尾确认，只给数据列表。若某项数据原始资料中未提及，填"—"。`,
 
     strategy: `\n\n**当前章节：设计策略**
 
@@ -1162,75 +1145,101 @@ ${formats[key] || '{"title":"","content":""}'}
 }
 
 /* ============================================================
-   应用章节内容到预览
+   智能提取：从 AI 回复中剔除对话前言/结尾，只保留结构化结论
+   - 如果文本包含编号列表（1. / 2. / 1、），仅保留编号项及其描述
+   - 否则原文返回（不破坏纯段落型内容）
 ============================================================ */
-async function applyChapter(chapter) {
+function smartExtractContent(text) {
+  const lines = text.split('\n');
+  const items = [];
+  let current = null;
+
+  for (const line of lines) {
+    const isNumbered = /^\s*\d+[\.、]\s/.test(line);
+    if (isNumbered) {
+      // 新编号项开始
+      if (current !== null) items.push(current.trim());
+      current = line;
+    } else if (current !== null) {
+      // 编号项的后续内容（描述行）——空行也保留，让每项之间有分隔
+      current += '\n' + line;
+    }
+    // 编号项开始前的内容（前言）一律忽略
+  }
+  if (current !== null) items.push(current.trim());
+
+  // 至少有 2 个编号项才视为结构化内容，否则原文返回
+  if (items.length >= 2) {
+    // 去掉每项末尾的多余空行，项间用单个换行分隔（紧凑）
+    return items.map(s => s.replace(/\n+$/, '')).join('\n');
+  }
+  return text;
+}
+
+/* ============================================================
+   应用章节内容到预览
+   直接使用最后一条 AI 消息，无需第二次 API 调用
+============================================================ */
+function applyChapter(chapter) {
   const key = chapter === 'analysis' ? S.analysisTab : chapter;
 
   if (!S.chats[key] || S.chats[key].length === 0) {
     toast('请先与 AI 对话生成内容后再应用'); return;
   }
 
-  const applyBtn = document.getElementById(`apply-${chapter}`);
-  const origText = applyBtn?.textContent || '应用到预览';
-  if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = '提取中…'; }
+  // 取最后一条 AI 回复
+  const lastAI = [...S.chats[key]].reverse().find(m => m.role === 'assistant');
+  if (!lastAI) { toast('AI 还没有回复，请先发送消息'); return; }
 
-  // 如果还没有提取过（或上次提取标记为 pending），调 API 提取结构化数据
-  if (!S.rawResponses[key] || S.rawResponses[key] === 'pending') {
-    try {
-      const extractMsgs = [
-        { role: 'system', content: buildExtractPrompt(key) },
-        ...S.chats[key],
-        { role: 'user', content: '请根据以上对话中最终确认的内容，按格式提取输出 JSON，直接输出 JSON，不要任何说明文字。' },
-      ];
-      const raw = await callAI(extractMsgs, true);
-      const m = raw.match(/\{[\s\S]*\}/);
-      S.rawResponses[key] = JSON.parse(m ? m[0] : raw);
-    } catch (err) {
-      if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = origText; }
-      toast('内容提取失败：' + err.message); return;
-    }
+  // 智能提取：若回复中包含编号列表（1. / 2. / 1、），只保留编号部分，
+  // 自动去掉 AI 的"好的，我来..."前言 和 "您看这样是否..."结尾
+  const content = smartExtractContent(lastAI.content);
+
+  // 固定章节标题（不使用 AI 自由发挥的标题）
+  const CHAPTER_TITLES = {
+    location:'区位分析', site:'场地现状', building:'建筑分析',
+    general:'工程概况', strategy:'设计策略', concept:'设计构思', theme:'设计理念'
+  };
+
+  // 从内容中提取关键词：优先匹配"数字. 短名 |"格式，其次提取行首的短词
+  function extractKeywords(text) {
+    // 匹配"1. 占位 |"或"1. 占位｜"格式
+    const matches = [...text.matchAll(/^\d+[\.\、]\s*([^|｜\n]{2,8})[|｜]/gm)];
+    if (matches.length >= 2) return matches.map(m => m[1].trim()).slice(0, 5);
+    // 匹配"· 关键词"或"• 关键词"格式
+    const bullets = [...text.matchAll(/^[·•·\-]\s*([^\n]{2,10})\n/gm)];
+    if (bullets.length >= 2) return bullets.map(m => m[1].trim()).slice(0, 5);
+    return [];
   }
 
-  const parsed = S.rawResponses[key];
-  if (!parsed || parsed === 'pending') {
-    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = origText; }
-    toast('提取结果为空，请继续对话完善内容'); return;
-  }
-
-  // 写入 S.applied
-  if (key === 'concept') {
-    // concept 章节同时更新两页
-    S.applied.concept = parsed.concept || parsed;
-    S.applied.theme   = parsed.theme   || null;
-  } else if (key === 'general') {
-    // 将 stats 合并进 applied.general
-    S.applied.general = { ...parsed, stats: parsed.stats || {} };
-  } else if (key === 'strategy') {
-    // strategy 的 items 转为 content 字符串供 renderer 解析
-    const items = (parsed.items || []).map(it => `${it.name}：${it.desc}`).join('\n');
-    S.applied.strategy = { title: parsed.title || '设计策略', content: items };
+  // 写入 S.applied（按章节类型处理）
+  if (key === 'strategy') {
+    // 策略：将编号列表解析为 "策略名：描述" 每行
+    const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+    const items = lines
+      .filter(l => /^\d/.test(l))
+      .map(l => {
+        const cleaned = l.replace(/^\d+[\.\、]\s*/, '');
+        const sep = cleaned.indexOf('：') > -1 ? '：' : (cleaned.indexOf(':') > -1 ? ':' : null);
+        if (sep) {
+          const i = cleaned.indexOf(sep);
+          return `${cleaned.slice(0, i).trim()}：${cleaned.slice(i+1).trim()}`;
+        }
+        return cleaned;
+      });
+    S.applied.strategy = { title: '设计策略', content: items.length ? items.join('\n') : content };
+  } else if (key === 'concept') {
+    // 构思：全文作为 concept.content，theme 暂不拆分
+    const kws = extractKeywords(content);
+    S.applied.concept = { title: '设计构思', content, keywords: kws };
+    // 保留现有 theme 或清空（让用户单独处理 theme 页）
   } else {
-    S.applied[key] = parsed;
+    S.applied[key] = { title: CHAPTER_TITLES[key] || key, content, keywords: extractKeywords(content) };
   }
 
-  // 更新已应用内容区域
-  const container = document.getElementById(`applied-${chapter}`);
-  const contentEl = document.getElementById(`applied-${chapter}-content`);
-  if (container && contentEl) {
-    container.style.display = 'block';
-    const data = S.applied[key];
-    const preview = (data?.content || '').slice(0, 100) + (data?.content?.length > 100 ? '…' : '');
-    contentEl.innerHTML = `
-      <div class="applied-result-title">已应用 · ${data?.title || ''}</div>
-      <div style="font-size:12px;color:var(--text-2);line-height:1.7;">${preview}</div>
-    `;
-  }
-
-  // 前期分析：标记对应子标签完成
+  // 标记子标签/主标签完成
   if (chapter === 'analysis') {
     document.getElementById(`asub-${key}`)?.classList.add('done');
-    // 如果四个子标签都应用了，整体标签标绿
     if (['location','site','building','general'].every(k => S.applied[k])) {
       document.getElementById('tab-analysis')?.classList.add('done');
     }
@@ -1240,8 +1249,7 @@ async function applyChapter(chapter) {
 
   renderPreviewPages();
   document.getElementById('btn-export')?.removeAttribute('disabled');
-  if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = origText; }
-  toast(`已应用「${S.applied[key]?.title || '内容'}」到预览`);
+  toast('已应用到预览');
 }
 
 function clearChat(chapter) {
@@ -1363,6 +1371,19 @@ function slot(w, h, label) {
   </div>`;
 }
 
+/* 将 AI 回复文本转为预览可渲染的 HTML
+   - 多个连续空行合并为一个，避免编号列表间距过大
+   - **粗体** → <strong>，换行 → <br>
+*/
+function fmtContent(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\n{2,}/g,'\n')   // 连续多个换行 → 单个换行，消除过大间距
+    .replace(/\n/g,'<br>');
+}
+
 /* 占位页（未应用时的灰色空白页） */
 function placeholderPage(pw, ph, mg, iw, ih, id) {
   const z = S.zoom;
@@ -1382,7 +1403,7 @@ const PAGE_RENDERERS = {
     const kws = d.keywords?.length ? d.keywords : ['区位优越','交通便利','配套完善'];
     const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
     return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
-      ${hdr(d.title||'区位分析','LOCATION ANALYSIS',mg)}
+      ${hdr('区位分析','LOCATION ANALYSIS',mg)}
       <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
         <div style="width:${lw}px;display:flex;flex-direction:column;gap:${Math.round(mg*0.25)}px;">
           ${slot(lw,'65%','区位总图')}
@@ -1392,7 +1413,7 @@ const PAGE_RENDERERS = {
           </div>
         </div>
         <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.45)}px;">
-          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${d.content||'项目位于城市核心区域，地理位置优越，周边配套完善。'}</div>
+          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${fmtContent(d.content)||'项目位于城市核心区域，地理位置优越，周边配套完善。'}</div>
           <div style="display:flex;flex-direction:column;gap:${Math.round(7*z)}px;">
             ${kws.map(k=>`<div style="display:flex;align-items:center;justify-content:flex-end;gap:${Math.round(7*z)}px;"><span style="font-size:${Math.round(20*z)}px;color:#3a3a3c;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${k}</span><div style="width:${Math.round(4*z)}px;height:${Math.round(4*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div></div>`).join('')}
           </div>
@@ -1407,7 +1428,7 @@ const PAGE_RENDERERS = {
     const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
     const gap=Math.round(mg*0.25);
     return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
-      ${hdr(d.title||'场地现状','SITE ANALYSIS',mg)}
+      ${hdr('场地现状','SITE ANALYSIS',mg)}
       <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
         <div style="width:${lw}px;display:flex;flex-direction:column;gap:${gap}px;">
           ${slot(lw,'62%','场地全景图')}
@@ -1418,7 +1439,7 @@ const PAGE_RENDERERS = {
           </div>
         </div>
         <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.45)}px;">
-          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${d.content||'场地地势平坦，植被覆盖良好，东侧有现状水体。'}</div>
+          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${fmtContent(d.content)||'场地地势平坦，植被覆盖良好，东侧有现状水体。'}</div>
           <div style="display:flex;flex-direction:column;gap:${Math.round(7*z)}px;">
             ${kws.map(k=>`<div style="display:flex;align-items:center;justify-content:flex-end;gap:${Math.round(7*z)}px;"><span style="font-size:${Math.round(20*z)}px;color:#3a3a3c;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${k}</span><div style="width:${Math.round(4*z)}px;height:${Math.round(4*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div></div>`).join('')}
           </div>
@@ -1433,7 +1454,7 @@ const PAGE_RENDERERS = {
     const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
     const gap=Math.round(mg*0.25);
     return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
-      ${hdr(d.title||'建筑分析','BUILDING ANALYSIS',mg)}
+      ${hdr('建筑分析','BUILDING ANALYSIS',mg)}
       <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
         <div style="width:${lw}px;display:flex;flex-direction:column;gap:${gap}px;">
           ${slot(lw,'62%','建筑总体布局图')}
@@ -1443,7 +1464,7 @@ const PAGE_RENDERERS = {
           </div>
         </div>
         <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.45)}px;">
-          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${d.content||'建筑风格现代简约，底层架空处理，围合出中心绿地。'}</div>
+          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${fmtContent(d.content)||'建筑风格现代简约，底层架空处理，围合出中心绿地。'}</div>
           <div style="display:flex;flex-direction:column;gap:${Math.round(7*z)}px;">
             ${kws.map(k=>`<div style="display:flex;align-items:center;justify-content:flex-end;gap:${Math.round(7*z)}px;"><span style="font-size:${Math.round(20*z)}px;color:#3a3a3c;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${k}</span><div style="width:${Math.round(4*z)}px;height:${Math.round(4*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div></div>`).join('')}
           </div>
@@ -1503,7 +1524,7 @@ const PAGE_RENDERERS = {
         <div>${slot('100%','100%','灵感图 4')}</div>
         <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.94);backdrop-filter:blur(12px);border-radius:${Math.round(10*z)}px;padding:${Math.round(16*z)}px ${Math.round(20*z)}px;max-width:${Math.round(iw*0.48)}px;text-align:center;box-shadow:0 ${Math.round(4*z)}px ${Math.round(20*z)}px rgba(0,0,0,0.1);">
           <div style="font-size:${Math.round(9*z)}px;font-weight:600;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:${Math.round(8*z)}px;">CONCEPT</div>
-          <div style="font-size:${Math.round(11*z)}px;line-height:1.85;color:#2a2a2a;">${d.content||'设计灵感源于自然山水与人文历史的交融，以景抒情，以园述史。'}</div>
+          <div style="font-size:${Math.round(11*z)}px;line-height:1.85;color:#2a2a2a;">${fmtContent(d.content)||'设计灵感源于自然山水与人文历史的交融，以景抒情，以园述史。'}</div>
         </div>
       </div>
     </div>`;
@@ -1525,7 +1546,7 @@ const PAGE_RENDERERS = {
         </div>
         <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.4)}px;">
           <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">
-            ${d.content||'以"共生"为核心理念，打造人与自然和谐共处的生态景观空间。'}
+            ${fmtContent(d.content)||'以"共生"为核心理念，打造人与自然和谐共处的生态景观空间。'}
           </div>
         </div>
       </div>
@@ -1677,11 +1698,13 @@ async function handleDroppedPDF(file, ta) {
 }
 
 /* ============================================================
-   AI 一键提取信息 + 生成全套文案（核心功能）
+   一键生成：提取项目信息 + 并行生成全套文案
+   两路并行请求：A=信息+前期分析，B=策略+构思+理念，速度比串行快约1倍
+   原始资料截断至8000字（头6000+尾2000），避免超长文档拖慢速度
 ============================================================ */
 async function autoExtractAndGenerate() {
-  const rawText = document.getElementById('raw-text')?.value?.trim();
-  if (!rawText && !S.info.imageData) {
+  const fullText = document.getElementById('raw-text')?.value?.trim();
+  if (!fullText && !S.info.imageData) {
     toast('请先粘贴原始资料或截图'); return;
   }
   if (!S.apiKey) {
@@ -1693,67 +1716,92 @@ async function autoExtractAndGenerate() {
   btn.disabled = true;
   prog.style.display = 'block';
   prog.style.color = 'var(--text-2)';
-  prog.innerHTML = '⏳ 正在分析原始资料，生成全套文案…<br>大约需要 20–40 秒，请稍候';
+  prog.innerHTML = '⏳ 正在并行生成全套文案，请稍候（约 15–25 秒）…';
 
-  const prompt = `你是专业景观设计文案师。以下是项目原始资料：
-${rawText || '（请根据景观设计常规场景推断）'}
+  // 截断：取前6000字 + 末2000字，关键信息都在头尾
+  const raw = fullText || '';
+  const rawText = raw.length > 8000
+    ? raw.slice(0, 6000) + '\n…（中间内容已省略）…\n' + raw.slice(-2000)
+    : raw;
 
-请完成：
-1. 从资料中提取项目基础信息
-2. 生成完整的7个章节文案
+  // ── 请求 A：提取项目信息 + 前期分析4章（数据驱动） ──
+  const promptA = `你是专业景观设计文案师。以下是项目原始资料：
+${rawText}
 
-严格返回以下 JSON 格式，不要任何额外文字：
+严格返回以下 JSON，不要任何额外文字：
 {
   "info": {
-    "name": "项目名称（从资料提取，无法确定则合理推断）",
-    "location": "项目地点",
-    "type": "项目类型（住宅/商业/公园等）",
-    "client": "甲方要求（若无则空字符串）"
+    "name": "项目名称",
+    "location": "项目地点（省市区）",
+    "type": "项目类型（住宅景观/商业景观/公园/市政等）",
+    "client": "甲方核心要求（若无则空字符串）"
   },
-  "location": { "title":"区位分析", "content":"150-220字专业正文", "keywords":["词1","词2","词3"] },
-  "site":     { "title":"场地现状", "content":"150-220字专业正文", "keywords":["词1","词2","词3"] },
-  "building": { "title":"建筑分析", "content":"150-220字专业正文", "keywords":["词1","词2","词3"] },
-  "general":  { "title":"工程概况", "content":"100-150字概况描述",
-                "stats":{ "用地面积":"数值或—", "景观面积":"数值或—", "绿化率":"数值或—", "容积率":"数值或—", "建筑密度":"数值或—", "停车位数":"数值或—" } },
-  "strategy": { "title":"设计策略", "items":[ { "name":"策略名", "desc":"一句话描述" } ] },
-  "concept":  { "title":"设计构思", "content":"构思说明", "keywords":["意向词1","意向词2","意向词3"] },
-  "theme":    { "title":"设计理念", "content":"150-200字理念阐述" }
+  "location": { "content":"1-4个编号要点，每点：简短标题（3-6字）换行+精炼正文，说清楚就行，禁止输出前言和结尾确认", "keywords":["词1","词2","词3"] },
+  "site":     { "content":"1-4个编号要点，每点：简短标题（3-6字）换行+精炼正文，重点点明场地特色与价值，禁止输出前言和结尾确认", "keywords":["词1","词2","词3"] },
+  "building": { "content":"说清楚颜色、风格、排布、调性等关键信息，整体不超过30字，禁止分点和前言", "keywords":["词1","词2","词3"] },
+  "general":  { "content":"只列数据，格式：数据名：数值（含单位），一行一条，不加任何标注符号", "stats":{ "用地面积":"数值+单位或—", "景观面积":"数值+单位或—", "绿化率":"百分比或—", "容积率":"数值或—", "建筑密度":"百分比或—", "停车位数":"数值或—" } }
 }`;
 
+  // ── 请求 B：策略+构思+理念（创意驱动，只需项目概要） ──
+  const promptB = `你是专业景观设计文案师。
+项目概况：${rawText.slice(0, 2000)}
+
+严格返回以下 JSON，不要任何额外文字：
+{
+  "strategy": { "items":[ { "name":"策略名（4-8字）", "desc":"一句话说明（25-40字）" } ] },
+  "concept":  { "content":"150-200字构思说明，阐述设计灵感与空间叙事主题", "keywords":["意向图关键词1","意向图关键词2","意向图关键词3"] },
+  "theme":    { "content":"150-200字理念阐述，语言有感染力与高度" }
+}
+策略条数：3-4条。`;
+
   try {
-    const raw = await callAI([{ role:'user', content:prompt }], true);
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('AI 返回格式有误，请重试');
-    const d = JSON.parse(m[0]);
+    // 两路并行，速度约为串行的一半
+    const [rawA, rawB] = await Promise.all([
+      callAI([{ role:'user', content:promptA }], true),
+      callAI([{ role:'user', content:promptB }], true),
+    ]);
 
-    // ① 填写项目基础信息到表单
-    if (d.info) {
-      if (d.info.name)     document.getElementById('proj-name').value     = d.info.name;
-      if (d.info.location) document.getElementById('proj-location').value = d.info.location;
-      if (d.info.type)     document.getElementById('proj-type').value     = d.info.type;
-      if (d.info.client)   document.getElementById('proj-client').value   = d.info.client;
+    const mA = rawA.match(/\{[\s\S]*\}/);
+    if (!mA) throw new Error('前期分析返回格式有误，请重试');
+    const dA = JSON.parse(mA[0]);
+
+    const mB = rawB.match(/\{[\s\S]*\}/);
+    if (!mB) throw new Error('创意章节返回格式有误，请重试');
+    const dB = JSON.parse(mB[0]);
+
+    // ① 填写项目基础信息
+    if (dA.info) {
+      if (dA.info.name)     document.getElementById('proj-name').value     = dA.info.name;
+      if (dA.info.location) document.getElementById('proj-location').value = dA.info.location;
+      if (dA.info.type)     document.getElementById('proj-type').value     = dA.info.type;
+      if (dA.info.client)   document.getElementById('proj-client').value   = dA.info.client;
     }
 
-    // ② 写入各章节数据（rawResponses + applied）
-    if (d.location) { S.rawResponses.location = d.location; S.applied.location = d.location; }
-    if (d.site)     { S.rawResponses.site     = d.site;     S.applied.site     = d.site; }
-    if (d.building) { S.rawResponses.building = d.building; S.applied.building = d.building; }
-    if (d.general)  {
-      S.rawResponses.general = d.general;
-      S.applied.general = { ...d.general, stats: d.general.stats || {} };
-    }
-    if (d.strategy) {
-      const items = (d.strategy.items || []).map(it => `${it.name}：${it.desc}`).join('\n');
-      S.rawResponses.strategy = d.strategy;
-      S.applied.strategy = { title: d.strategy.title || '设计策略', content: items };
-    }
-    if (d.concept) {
-      S.rawResponses.concept = { concept: d.concept, theme: d.theme };
-      S.applied.concept = d.concept;
-    }
-    if (d.theme)    { S.applied.theme = d.theme; }
+    // ② 写入前期分析（来自 A）
+    const ATITLES = { location:'区位分析', site:'场地现状', building:'建筑分析', general:'工程概况' };
+    ['location','site','building','general'].forEach(k => {
+      if (!dA[k]) return;
+      S.applied[k] = k === 'general'
+        ? { title:'工程概况', ...dA[k], stats: dA[k].stats || {} }
+        : { title: ATITLES[k], ...dA[k] };
+      // 注入到对话记录，供后续继续优化
+      S.chats[k] = [{ role:'assistant', content: dA[k].content || '' }];
+      S.chatHTML[k] = _buildChatMsgHTML(dA[k].content || '');
+    });
 
-    // ③ 标记导航标签为已完成
+    // ③ 写入创意章节（来自 B）
+    if (dB.strategy) {
+      const items = (dB.strategy.items || []).map(it => `${it.name}：${it.desc}`).join('\n');
+      S.applied.strategy = { title:'设计策略', content: items };
+      S.chats.strategy = [{ role:'assistant', content: items }];
+    }
+    if (dB.concept) {
+      S.applied.concept = { title:'设计构思', ...dB.concept };
+      S.chats.concept = [{ role:'assistant', content: dB.concept.content || '' }];
+    }
+    if (dB.theme) { S.applied.theme = { title:'设计理念', ...dB.theme }; }
+
+    // ④ 标记导航标签完成
     ['analysis','strategy','concept'].forEach(ch =>
       document.getElementById(`tab-${ch}`)?.classList.add('done')
     );
@@ -1762,7 +1810,7 @@ ${rawText || '（请根据景观设计常规场景推断）'}
     );
     document.getElementById('btn-export')?.removeAttribute('disabled');
 
-    // ④ 刷新预览
+    // ⑤ 刷新预览
     renderPreviewPages();
 
     prog.style.color = 'var(--green)';
@@ -1777,6 +1825,201 @@ ${rawText || '（请根据景观设计常规场景推断）'}
   }
 
   btn.disabled = false;
+}
+
+/* ============================================================
+   读取项目基础信息表单（各章节生成时用作上下文）
+============================================================ */
+function getProjectInfo() {
+  return {
+    name:     document.getElementById('proj-name')?.value?.trim()     || '',
+    location: document.getElementById('proj-location')?.value?.trim() || '',
+    type:     document.getElementById('proj-type')?.value?.trim()     || '',
+    client:   document.getElementById('proj-client')?.value?.trim()   || '',
+  };
+}
+
+/* ============================================================
+   章节自动生成（进入章节页时自动触发，已有内容则跳过）
+   逐步递进：前期分析 → 设计策略（引用分析结论）→ 设计构思（引用策略）
+============================================================ */
+async function autoGenerateChapter(screen) {
+  if (!S.apiKey) return;
+
+  const rawFull = document.getElementById('raw-text')?.value?.trim() || '';
+  // 截断原始资料：取前5000字+末1000字，覆盖关键信息
+  const rawText = rawFull.length > 6000
+    ? rawFull.slice(0, 5000) + '\n…\n' + rawFull.slice(-1000)
+    : rawFull;
+
+  const info = getProjectInfo();
+  const infoStr = [info.name, info.location, info.type, info.client].filter(Boolean).join(' / ');
+
+  /* ── 前期分析：生成4个章节 ── */
+  if (screen === 'analysis') {
+    // 已全部生成则跳过
+    if (['location','site','building','general'].every(k => S.applied[k])) return;
+
+    const applyBtn = document.getElementById('apply-analysis');
+    if (applyBtn) applyBtn.disabled = true;
+    const thinking = addThinking('analysis');
+
+    const prompt = `你是资深景观设计师，正在为以下项目撰写前期分析文案。
+项目：${infoStr || '未知项目'}
+原始资料（节选）：
+${rawText || '（请根据项目类型和地点合理推断）'}
+
+生成前期分析4个章节，严格返回 JSON，不要任何额外文字：
+{
+  "location": { "content":"1-4个编号要点，每点：简短标题（3-6字）换行+精炼正文，说清楚就行，禁止前言和结尾确认", "keywords":["词1","词2","词3"] },
+  "site":     { "content":"1-4个编号要点，每点：简短标题（3-6字）换行+精炼正文，重点点明场地特色与价值，禁止前言和结尾确认", "keywords":["词1","词2","词3"] },
+  "building": { "content":"说清楚颜色、风格、排布、调性等关键信息，整体不超过30字，禁止分点和前言", "keywords":["词1","词2","词3"] },
+  "general":  { "content":"只列数据，格式：数据名：数值（含单位），一行一条，不加任何标注符号", "stats":{ "用地面积":"数值+单位或—", "景观面积":"数值+单位或—", "绿化率":"百分比或—", "容积率":"数值或—", "建筑密度":"百分比或—", "停车位数":"数值或—" } }
+}`;
+
+    try {
+      const raw = await callAI([{ role:'user', content:prompt }], true);
+      thinking.remove();
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('格式有误');
+      const d = JSON.parse(m[0]);
+
+      const TITLES = { location:'区位分析', site:'场地现状', building:'建筑分析', general:'工程概况' };
+
+      // 写入 S.applied 和 S.chats（供后续对话继续）
+      ['location','site','building','general'].forEach(k => {
+        if (!d[k]) return;
+        S.applied[k] = k === 'general'
+          ? { title:'工程概况', ...d[k], stats: d[k].stats || {} }
+          : { title: TITLES[k], ...d[k] };
+        // 注入到各子标签的 chat 记录中
+        S.chats[k] = [{ role:'assistant', content: d[k].content || '' }];
+        // 存储 chatHTML 供切换子标签时恢复
+        S.chatHTML[k] = _buildChatMsgHTML(d[k].content || '');
+      });
+
+      // 当前子标签直接显示在 DOM 中
+      const curContent = d[S.analysisTab]?.content || '';
+      if (curContent) addMsg('analysis', 'ai', curContent);
+      // 保存当前 DOM（addMsg 之后再存一次，确保同步）
+      S.chatHTML[S.analysisTab] = document.getElementById('chat-analysis')?.innerHTML || S.chatHTML[S.analysisTab];
+
+      if (applyBtn) applyBtn.disabled = false;
+      ['location','site','building','general'].forEach(k =>
+        document.getElementById(`asub-${k}`)?.classList.add('done')
+      );
+      document.getElementById('tab-analysis')?.classList.add('done');
+      document.getElementById('btn-export')?.removeAttribute('disabled');
+      renderPreviewPages();
+
+    } catch(err) {
+      thinking.remove();
+      addMsg('analysis', 'ai', `⚠️ 生成失败：${err.message}\n\n请检查网络或 API Key，也可手动输入内容。`);
+    }
+    return;
+  }
+
+  /* ── 设计策略：引用前期分析结论 ── */
+  if (screen === 'strategy') {
+    if (S.applied.strategy) return;
+
+    const applyBtn = document.getElementById('apply-strategy');
+    if (applyBtn) applyBtn.disabled = true;
+    const thinking = addThinking('strategy');
+
+    // 引用前期分析结论作为上下文
+    const analysisCtx = [
+      S.applied.location?.content,
+      S.applied.site?.content,
+      S.applied.building?.content,
+    ].filter(Boolean).join('\n\n');
+
+    const prompt = `你是资深景观设计师。
+项目：${infoStr || '未知项目'}
+${analysisCtx ? `\n前期分析结论：\n${analysisCtx}\n` : ''}
+基于以上分析，逻辑推导3-4条景观设计策略，严格返回 JSON，不要任何额外文字：
+{
+  "items": [
+    { "name":"策略名（4-8字）", "desc":"一句话阐明为何采用此策略及核心做法（25-40字）" }
+  ]
+}`;
+
+    try {
+      const raw = await callAI([{ role:'user', content:prompt }], true);
+      thinking.remove();
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('格式有误');
+      const d = JSON.parse(m[0]);
+
+      const items = (d.items || []).map(it => `${it.name}：${it.desc}`).join('\n');
+      S.applied.strategy = { title:'设计策略', content: items };
+      S.chats.strategy = [{ role:'assistant', content: items }];
+      addMsg('strategy', 'ai', items);
+      if (applyBtn) applyBtn.disabled = false;
+      document.getElementById('tab-strategy')?.classList.add('done');
+      document.getElementById('btn-export')?.removeAttribute('disabled');
+      renderPreviewPages();
+
+    } catch(err) {
+      thinking.remove();
+      addMsg('strategy', 'ai', `⚠️ 生成失败：${err.message}\n\n请手动输入策略内容。`);
+    }
+    return;
+  }
+
+  /* ── 设计构思：引用策略内容 ── */
+  if (screen === 'concept') {
+    if (S.applied.concept) return;
+
+    const applyBtn = document.getElementById('apply-concept');
+    if (applyBtn) applyBtn.disabled = true;
+    const thinking = addThinking('concept');
+
+    const strategyCtx = S.applied.strategy?.content || '';
+
+    const prompt = `你是资深景观设计师。
+项目：${infoStr || '未知项目'}
+${strategyCtx ? `\n设计策略：\n${strategyCtx}\n` : ''}
+基于以上信息，提炼设计构思与设计理念，严格返回 JSON，不要任何额外文字：
+{
+  "concept": { "content":"150-200字，阐述设计灵感来源与空间叙事主题", "keywords":["意向图关键词1","意向图关键词2","意向图关键词3"] },
+  "theme":   { "content":"150-200字，提炼项目核心价值观与精神主张，语言有感染力" }
+}`;
+
+    try {
+      const raw = await callAI([{ role:'user', content:prompt }], true);
+      thinking.remove();
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('格式有误');
+      const d = JSON.parse(m[0]);
+
+      if (d.concept) {
+        S.applied.concept = { title:'设计构思', ...d.concept };
+        S.chats.concept = [{ role:'assistant', content: d.concept.content || '' }];
+        addMsg('concept', 'ai', d.concept.content || '');
+        if (applyBtn) applyBtn.disabled = false;
+      }
+      if (d.theme) { S.applied.theme = { title:'设计理念', ...d.theme }; }
+
+      document.getElementById('tab-concept')?.classList.add('done');
+      document.getElementById('btn-export')?.removeAttribute('disabled');
+      renderPreviewPages();
+
+    } catch(err) {
+      thinking.remove();
+      addMsg('concept', 'ai', `⚠️ 生成失败：${err.message}\n\n请手动输入构思内容。`);
+    }
+  }
+}
+
+/* 构建单条 AI 消息的 HTML（供 S.chatHTML 存储非当前子标签的内容） */
+function _buildChatMsgHTML(text) {
+  const time = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
+  const html = text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\n/g,'<br>');
+  return `<div class="msg ai"><div class="msg-bubble">${html}</div><div class="msg-time">${time}</div></div>`;
 }
 
 /* ============================================================
