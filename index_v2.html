@@ -834,10 +834,10 @@ const ANALYSIS_TABS = [
 ];
 
 const ANALYSIS_EMPTY = {
-  location: '描述区位特点，或发送「开始分析」让 AI 自动提取',
-  site:     '描述场地现状，或发送「开始分析」让 AI 自动提取',
-  building: '描述建筑特点，或发送「开始分析」让 AI 自动提取',
-  general:  '描述工程概况，或发送「开始分析」让 AI 自动提取',
+  location: '发送「开始分析」，AI 将结合原始资料深度解读区位价值\n\n也可以直接描述你关注的区位特点，展开讨论',
+  site:     '发送「开始分析」，AI 将梳理场地现状条件与设计机遇\n\n也可以描述你注意到的特殊场地要素',
+  building: '发送「开始分析」，AI 将分析建筑产品特征对景观的影响\n\n也可以指出你认为需要重点关注的建筑界面问题',
+  general:  '发送「开始分析」，AI 将从原始资料中提取规划指标数据\n\n也可以直接提供具体数值',
 };
 
 function switchAnalysisTab(tab) {
@@ -911,7 +911,18 @@ function addMsg(chapter, role, text) {
   const time = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
   const div = document.createElement('div');
   div.className = `msg ${role}`;
-  div.innerHTML = `<div class="msg-bubble">${text.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')}</div><div class="msg-time">${time}</div>`;
+  // 支持基础 Markdown 渲染：标题 / 粗体 / 列表 / 分割线 / 换行
+  const html = text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/^#{3}\s+(.+)$/gm,  '<strong style="font-size:13px;color:var(--text-1);">$1</strong>')
+    .replace(/^#{1,2}\s+(.+)$/gm,'<strong style="font-size:14px;color:var(--text-1);">$1</strong>')
+    .replace(/\*\*(.*?)\*\*/g,   '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g,       '<em>$1</em>')
+    .replace(/^[-•·]\s+(.+)$/gm, '<span style="display:block;padding-left:12px;position:relative;"><span style="position:absolute;left:2px;">·</span>$1</span>')
+    .replace(/^\d+\.\s+(.+)$/gm, '<span style="display:block;padding-left:16px;">$&</span>')
+    .replace(/^---+$/gm,         '<hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">')
+    .replace(/\n/g, '<br>');
+  div.innerHTML = `<div class="msg-bubble">${html}</div><div class="msg-time">${time}</div>`;
   history.appendChild(div);
   history.scrollTop = history.scrollHeight;
 }
@@ -952,23 +963,19 @@ async function sendToAI(chapter, userText) {
   ];
 
   try {
-    const raw = await callAI(messages, key !== 'preview');
+    // 自由对话模式：不强制 JSON，让 AI 自然表达专业意见
+    const raw = await callAI(messages, false);
     thinking.remove();
 
-    // 存入多轮历史（用于下次发送时传给 API）
+    // 存入多轮对话历史
     S.chats[key].push({ role: 'user',      content: userText });
     S.chats[key].push({ role: 'assistant', content: raw });
 
-    // 解析 JSON 并缓存供"应用"按钮使用
-    if (key !== 'preview') {
-      try {
-        const m = raw.match(/\{[\s\S]*\}/);
-        S.rawResponses[key] = JSON.parse(m ? m[0] : raw);
-      } catch { S.rawResponses[key] = null; }
-    }
+    // 标记该章节有对话内容（具体提取在点击「应用到预览」时进行）
+    S.rawResponses[key] = 'pending';
 
-    // 在聊天区展示格式化摘要
-    addMsg(chapter, 'ai', formatAIReply(key, raw));
+    // 直接展示 AI 的完整回复（支持 Markdown）
+    addMsg(chapter, 'ai', raw);
 
     // 激活应用按钮
     const applyBtn = document.getElementById(`apply-${chapter}`);
@@ -1038,7 +1045,10 @@ async function callAI(messages, jsonMode = true) {
   return d.choices[0].message.content;
 }
 
-/* ---- 各章节 System Prompt ---- */
+/* ============================================================
+   System Prompt 构建——确立 AI 的专业身份与项目上下文
+   核心原则：先自由对话深度探讨，再由"应用"按钮单独提取结构化数据
+============================================================ */
 function buildSystemPrompt(key) {
   const name    = document.getElementById('proj-name')?.value?.trim()     || '';
   const loc     = document.getElementById('proj-location')?.value?.trim() || '';
@@ -1046,38 +1056,147 @@ function buildSystemPrompt(key) {
   const client  = document.getElementById('proj-client')?.value?.trim()   || '';
   const rawText = document.getElementById('raw-text')?.value?.trim()      || '';
 
-  const projCtx = ['你是专业景观设计文案师，擅长为方案文本撰写专业内容。',
-    '',
+  // 项目背景（每次对话都携带）
+  const projBlock = [
     '【项目信息】',
-    name    ? `项目名称：${name}`   : null,
-    loc     ? `项目地点：${loc}`    : null,
-    type    ? `项目类型：${type}`   : null,
-    client  ? `甲方要求：${client}` : null,
-    rawText ? `\n【原始资料】\n${rawText}` : '（暂无原始资料，根据项目信息合理推断）',
-  ].filter(v=>v!==null).join('\n');
+    name   ? `· 项目名称：${name}`   : null,
+    loc    ? `· 项目地点：${loc}`    : null,
+    type   ? `· 项目类型：${type}`   : null,
+    client ? `· 甲方要求：${client}` : null,
+  ].filter(Boolean).join('\n');
 
-  const jsonNote = '每次回复都必须返回完整 JSON，不要附加解释文字。';
+  const rawBlock = rawText
+    ? `\n\n【原始资料（建筑文本 / 设计任务书 / 规划指标）】\n${rawText}`
+    : '\n\n（暂无原始资料，请根据项目信息合理推断，并在回复中注明推断依据）';
 
-  const prompts = {
-    location: `${projCtx}\n\n请为【区位分析】章节生成专业文案。从原始资料中提炼区位特点、交通条件、周边配套。正文150-220字，语言客观专业。提炼3-5个关键词。${jsonNote}\n格式：{"title":"区位分析","content":"正文","keywords":["词1","词2","词3"]}`,
-    site:     `${projCtx}\n\n请为【场地现状】章节生成专业文案。从原始资料中提炼地形、植被、水体、现状条件等要素。正文150-220字。提炼3-5个关键词。${jsonNote}\n格式：{"title":"场地现状","content":"正文","keywords":["词1","词2","词3"]}`,
-    building: `${projCtx}\n\n请为【建筑分析】章节生成专业文案。从原始资料中提炼建筑风格、体量、界面特征及与景观的关系。正文150-220字。提炼3-5个关键词。${jsonNote}\n格式：{"title":"建筑分析","content":"正文","keywords":["词1","词2","词3"]}`,
-    general:  `${projCtx}\n\n请为【工程概况】章节生成文案，并提取规划指标数值（如原始资料中未提及则填"—"）。${jsonNote}\n格式：{"title":"工程概况","content":"概况描述100-150字","stats":{"用地面积":"数值","景观面积":"数值","绿化率":"数值","容积率":"数值","建筑密度":"数值","停车位数":"数值"}}`,
-    strategy: `${projCtx}\n\n请为【设计策略】章节推导3-5条景观策略，每条策略有明确针对性。${jsonNote}\n格式：{"title":"设计策略","items":[{"name":"策略名","desc":"一句话描述"},{"name":"策略名","desc":"描述"}]}`,
-    concept:  `${projCtx}\n\n请为【设计构思】和【设计理念】两个章节生成文案。设计构思：描述灵感意象，提供3-4个配图关键词。设计理念：核心哲学，语言富有感染力，150-200字。${jsonNote}\n格式：{"concept":{"title":"设计构思","content":"构思说明","keywords":["意向词1","意向词2","意向词3"]},"theme":{"title":"设计理念","content":"理念阐述"}}`,
-    preview:  `${projCtx}\n\n你正在帮助用户对已完成的景观方案文本进行最终调整，可自由回复，无需固定 JSON 格式。`,
+  // ── 核心角色定义（所有章节共用）──
+  const coreRole = `你是一位拥有15年经验的资深景观设计师，长期服务于高端住宅景观方案设计，精通中国古典园林美学与现代景观语言的融合，熟悉甲方汇报逻辑、规划合规要求与成本控制思维。
+
+你目前在协助设计师完成一份住宅景观概念方案文本。设计师会向你描述想法、提供资料、提出修改意见，你们共同通过对话打磨出高质量的专业文案。
+
+**对话方式：**
+- 用专业、流畅的中文自然交流，像真正的设计同行一样分析问题、提出建议、深化理念
+- 不要每次都机械地输出格式化结构，先充分讨论，设计师满意后自行点击「应用到预览」提取内容
+- 回答要有深度——可以引用设计理论、文化典故、类比案例，帮助设计师拔高设计高度
+- 如果原始资料中有具体数据（如退线、绿地率、户型信息），请在分析中引用这些数据
+- 可以主动提问、反问、提出优化建议，引导设计师深入思考
+
+${projBlock}${rawBlock}`;
+
+  // ── 各章节专项引导 ──
+  const guides = {
+    location: `\n\n**当前章节：区位分析**
+
+区位分析的价值：向读者（甲方、评审）阐明项目所处的宏观区位优势、交通便利性、周边配套资源及城市发展价值，为整个方案建立"选址有眼光"的认知基础。
+
+好的区位分析不只是罗列数据，而是讲清楚"这里为什么值得"。请从原始资料中提炼关键信息，如资料不足可结合项目地点的实际情况进行专业推断，语言客观有据，适当体现区位价值主张。`,
+
+    site: `\n\n**当前章节：场地现状**
+
+场地现状分析是设计"有的放矢"的依据。核心是客观呈现地块现有条件——地形地貌、水系植被、周边界面、现状资源与制约——并从中挖掘设计机遇。
+
+好的场地分析不只说"现状是什么"，更要传递"这些条件对设计意味着什么"。三面环水是机遇，西侧噪音是挑战，农田界面是特色——这些都是后续设计策略的出发点，请帮助设计师把这层逻辑讲清楚。`,
+
+    building: `\n\n**当前章节：建筑分析**
+
+建筑分析帮助读者理解景观设计与建筑的关系——建筑风格如何影响景观语言的选择？建筑布局创造了哪些景观机遇（如架空层、退让空间、视线通廊）？建筑产品类型（高层/别墅/洋房）对景观设计有哪些不同诉求？
+
+请从原始资料中提炼建筑风格定位、产品业态、户型赠送空间、立面材质等信息，分析它们对景观设计的指导意义。如发现建筑布局存在景观难点（如长巷道、密度过高），也请指出并提供解决思路。`,
+
+    general: `\n\n**当前章节：工程概况**
+
+工程概况是文本的"数据名片"，需要客观准确地呈现项目基本规划指标。请从原始资料中提取：用地面积、建筑面积、景观面积、绿化率、容积率、建筑密度、停车位等关键数据。
+
+如某项数据资料中未明确提及，请注明"待确认"或根据同类项目合理估算并标注。概况文字部分简明扼要，让读者快速了解项目规模与定位。`,
+
+    strategy: `\n\n**当前章节：设计策略**
+
+设计策略是连接"分析"与"方案"的桥梁，是整个文本逻辑的核心。
+
+**好的设计策略要做到：**
+1. 针对这个地块的具体问题提出解法（不能放之四海皆准）
+2. 体现设计师的专业判断与创造力
+3. 有清晰的执行路径，不空洞
+
+请结合项目特征（如三面环水/临农田/高层+别墅等），从"界面处理、空间营造、生态设计、功能植入、文化意境"等维度展开思考，推导出有针对性的景观策略。可以参考山水画论、中国园林哲学等文化视角来提升策略的文化高度。`,
+
+    concept: `\n\n**当前章节：设计构思 & 设计理念**
+
+这是整个文本最有灵魂的部分，需要设计师投入最多创意。
+
+**设计构思**：聚焦"我从哪里获得灵感"——可以是场地的自然特质（水、田、光影）、地域文化（江南、水乡）、某个具体意象（山水画、田园诗、折扇）。要有画面感，让读者感受到设计师的创作起点。
+
+**设计理念**：是构思的升华，是项目的价值观宣言——"我们要为居住在这里的人创造什么样的生活方式和精神体验"。语言要有感染力、有高度，但不能空洞。
+
+中国古典山水画论（三远法、可游可居可望）、江南园林哲学（借景、框景、藏露）、儒道文化（天人合一、隐逸精神）、现代生活方式研究，都是很好的思想来源。请帮助设计师找到与这个地块最契合的文化切入点，提炼出独特的主题意象。`,
+
+    preview: `\n\n你正在协助设计师对已完成的景观文本进行整体审阅和优化。可以自由讨论——文本逻辑连贯性、语言表达、文化深度、篇幅调整、章节衔接等任何问题。`,
   };
 
-  return prompts[key] || prompts.preview;
+  return coreRole + (guides[key] || guides.preview);
+}
+
+/* ============================================================
+   提取 Prompt——点击「应用到预览」时，从对话中提取结构化数据
+   使用独立的 system prompt，与对话 prompt 分离，确保精准提取
+============================================================ */
+function buildExtractPrompt(key) {
+  const formats = {
+    location: `{"title":"（3-6字标题，可比'区位分析'更有特色）","content":"150-220字正文","keywords":["关键词1","关键词2","关键词3"]}`,
+    site:     `{"title":"（标题）","content":"150-220字正文","keywords":["关键词1","关键词2","关键词3"]}`,
+    building: `{"title":"（标题）","content":"150-220字正文","keywords":["关键词1","关键词2","关键词3"]}`,
+    general:  `{"title":"工程概况","content":"100-150字概况","stats":{"用地面积":"","建筑面积":"","景观面积":"","绿化率":"","容积率":"","建筑密度":""}}`,
+    strategy: `{"title":"设计策略","items":[{"name":"策略名（4-8字）","desc":"一句话说明（20-40字）"}]}（共3-5条）`,
+    concept:  `{"concept":{"title":"（设计构思标题）","content":"150-200字构思说明","keywords":["意向图关键词1","意向图关键词2","意向图关键词3"]},"theme":{"title":"（设计理念标题）","content":"150-200字理念阐述"}}`,
+  };
+  return `你是一个专业的内容提取助手。请从以上对话中提取最终确认的设计文案，整理为以下 JSON 格式输出。只输出 JSON，不要任何说明或前缀文字。
+
+目标格式：
+${formats[key] || '{"title":"","content":""}'}
+
+提取原则：
+- 优先提取对话中最后一个版本的内容（若有多轮修改，取最新版）
+- title 可以结合对话中提到的创意命名，不必拘泥于"区位分析"等通用名称
+- content 保持连贯的段落式正文，去掉 Markdown 格式符号
+- keywords 提炼最有画面感、最能代表设计意向的词汇`;
 }
 
 /* ============================================================
    应用章节内容到预览
 ============================================================ */
-function applyChapter(chapter) {
+async function applyChapter(chapter) {
   const key = chapter === 'analysis' ? S.analysisTab : chapter;
+
+  if (!S.chats[key] || S.chats[key].length === 0) {
+    toast('请先与 AI 对话生成内容后再应用'); return;
+  }
+
+  const applyBtn = document.getElementById(`apply-${chapter}`);
+  const origText = applyBtn?.textContent || '应用到预览';
+  if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = '提取中…'; }
+
+  // 如果还没有提取过（或上次提取标记为 pending），调 API 提取结构化数据
+  if (!S.rawResponses[key] || S.rawResponses[key] === 'pending') {
+    try {
+      const extractMsgs = [
+        { role: 'system', content: buildExtractPrompt(key) },
+        ...S.chats[key],
+        { role: 'user', content: '请根据以上对话中最终确认的内容，按格式提取输出 JSON，直接输出 JSON，不要任何说明文字。' },
+      ];
+      const raw = await callAI(extractMsgs, true);
+      const m = raw.match(/\{[\s\S]*\}/);
+      S.rawResponses[key] = JSON.parse(m ? m[0] : raw);
+    } catch (err) {
+      if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = origText; }
+      toast('内容提取失败：' + err.message); return;
+    }
+  }
+
   const parsed = S.rawResponses[key];
-  if (!parsed) { toast('请先生成内容后再应用'); return; }
+  if (!parsed || parsed === 'pending') {
+    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = origText; }
+    toast('提取结果为空，请继续对话完善内容'); return;
+  }
 
   // 写入 S.applied
   if (key === 'concept') {
@@ -1120,8 +1239,8 @@ function applyChapter(chapter) {
   }
 
   renderPreviewPages();
-  // 只要有任意章节被应用，就解锁导出按钮
   document.getElementById('btn-export')?.removeAttribute('disabled');
+  if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = origText; }
   toast(`已应用「${S.applied[key]?.title || '内容'}」到预览`);
 }
 
@@ -1133,10 +1252,10 @@ function clearChat(chapter) {
 
   const history = document.getElementById(`chat-${chapter}`);
   const empties = {
-    analysis: ANALYSIS_EMPTY[S.analysisTab] || '发送「开始分析」自动生成',
-    strategy: '描述场地核心问题，AI 将推导对应的景观策略',
-    concept:  '描述灵感方向，或发送「生成设计构思」自由发挥',
-    preview:  '截图某区域，描述修改内容',
+    analysis: ANALYSIS_EMPTY[S.analysisTab] || '发送「开始分析」，AI 将结合原始资料深入解读',
+    strategy: '描述项目的核心挑战，AI 将推导有针对性的景观策略\n\n也可以发送「开始推导设计策略」直接生成',
+    concept:  '告诉 AI 你的灵感方向，或发送「帮我提炼设计主题」开始头脑风暴\n\n可以结合山水画、地域文化等文化线索进行探讨',
+    preview:  '描述你想调整的内容，或粘贴某段文字让 AI 优化',
   };
   history.innerHTML = `<div class="chat-empty"><p>${empties[chapter]}</p></div>`;
   document.getElementById(`apply-${chapter}`)?.setAttribute('disabled', true);
