@@ -211,6 +211,10 @@ html, body {
 .btn-apply:disabled { background: var(--border); color: var(--text-3); cursor: not-allowed; }
 .btn-clear-chat { padding: 8px 12px; border-radius: var(--r-sm); border: 1px solid var(--border); background: #fff; color: var(--text-2); font-size: 12px; cursor: pointer; }
 .btn-clear-chat:hover { background: var(--bg); }
+/* 换一批方案按钮 */
+.btn-regen { padding: 8px 12px; border-radius: var(--r-sm); border: 1.5px solid var(--accent); background: #fff; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.btn-regen:hover { background: rgba(0,122,255,0.07); }
+.btn-regen:disabled { border-color: var(--border); color: var(--text-3); cursor: not-allowed; background: #fff; }
 
 /* ============================================================
    屏幕1：项目信息
@@ -563,7 +567,7 @@ html, body {
       <div id="concept-text-panel" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
         <!-- 三个方案选择卡片（一键生成后出现） -->
         <div class="concept-opts-bar" id="concept-opts-bar" style="display:none;">
-          <div class="opts-hint">AI 生成了三个构思方向，点击选择 · 可在下方对话继续优化</div>
+          <div class="opts-hint">点击选中一个方向 · 选中后在下方对话框进一步优化 · 不满意可在下方输入新要求后点「换一批」</div>
           <div class="opts-row">
             <div class="concept-opt active" id="copt-0" onclick="selectConceptOption(0)">
               <div class="copt-num">方案一</div>
@@ -587,12 +591,14 @@ html, body {
         </div>
         <div class="chat-input-area">
           <div class="chat-input-wrap">
-            <textarea class="chat-input" id="input-concept" placeholder="描述灵感来源、设计主题、风格偏好…" rows="1" onkeydown="handleEnter(event,'concept')" oninput="autoResize(this)"></textarea>
+            <textarea class="chat-input" id="input-concept" placeholder="选中方案后在此输入优化要求…或填写新需求后点「换一批方案」" rows="1" onkeydown="handleEnter(event,'concept')" oninput="autoResize(this)"></textarea>
             <button class="btn-send" onclick="sendMsg('concept')" id="send-concept">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
           </div>
           <div class="input-actions">
+            <!-- 换一批方案：重新生成三个选项 tabs -->
+            <button class="btn-regen" id="btn-regen-concept" onclick="regenConceptOptions()" title="根据输入框的要求重新生成三个方案">换一批方案</button>
             <button class="btn-apply" id="apply-concept" onclick="applyChapter('concept')" disabled>应用到预览</button>
             <button class="btn-clear-chat" onclick="clearChat('concept')">清空对话</button>
           </div>
@@ -903,6 +909,86 @@ function selectConceptOption(idx) {
   // 启用应用按钮 + 刷新预览
   document.getElementById('apply-concept')?.removeAttribute('disabled');
   renderPreviewPages();
+}
+
+/* ============================================================
+   换一批方案：根据输入框要求重新生成三个构思方案（更新 tabs）
+   与普通"发送"区分——发送 = 优化当前选中方案；换一批 = 生成三个新选项
+============================================================ */
+async function regenConceptOptions() {
+  const input   = document.getElementById('input-concept');
+  const userReq = input.value.trim();
+  if (!userReq) { toast('请先在输入框描述你的新方向要求'); return; }
+  if (!S.apiKey) { toast('请先设置 API Key'); return; }
+
+  const btn = document.getElementById('btn-regen-concept');
+  btn.disabled = true; btn.textContent = '生成中…';
+
+  // 显示方案栏（若尚未显示）
+  const bar = document.getElementById('concept-opts-bar');
+  if (bar) bar.style.display = 'block';
+
+  // 在聊天区展示用户输入（让历史可见）
+  addMsg('concept', 'user', userReq);
+  input.value = ''; input.style.height = '';
+
+  // 占位 thinking 泡
+  const chatEl = document.getElementById('chat-concept');
+  const thinking = document.createElement('div');
+  thinking.className = 'msg ai'; thinking.innerHTML = '<div class="msg-bubble" style="color:var(--text-3)">正在生成三个方案…</div>';
+  chatEl.appendChild(thinking); chatEl.scrollTop = chatEl.scrollHeight;
+
+  // 组合 prompt：项目信息 + 原始资料节选 + 用户新要求
+  const projName = document.getElementById('proj-name')?.value?.trim()     || '';
+  const projLoc  = document.getElementById('proj-location')?.value?.trim() || '';
+  const projType = document.getElementById('proj-type')?.value?.trim()     || '';
+  const rawFull  = document.getElementById('raw-text')?.value?.trim()      || '';
+  const rawSnip  = rawFull.length > 1500 ? rawFull.slice(0, 1500) + '…' : rawFull;
+
+  const regenPrompt = `你是专业景观设计文案师。
+项目：${projName} | 地点：${projLoc} | 类型：${projType}
+${rawSnip ? `原始资料节选：${rawSnip}\n` : ''}
+设计师新要求：${userReq}
+
+请根据以上信息生成3个完全不同的设计构思方案，严格只返回 JSON 数组，不要任何额外文字：
+[
+  { "theme_name":"四字主题①（须与项目地域文化/场地高度契合，不可通用）", "content":"100-140字：主题来源+与项目关联+空间叙事方向", "keywords":["搜图词1","搜图词2","搜图词3"], "zones":[{"name":"景区名（2-4字）","note":"关联（8字内）"}] },
+  { "theme_name":"四字主题②（与①完全不同的文化切入角度）", "content":"100-140字", "keywords":["词1","词2","词3"], "zones":[{"name":"景区名","note":"关联"}] },
+  { "theme_name":"四字主题③（第三种文化视角）",              "content":"100-140字", "keywords":["词1","词2","词3"], "zones":[{"name":"景区名","note":"关联"}] }
+]
+每方案 zones 共5-6个景区，三个方案主题须完全不同。`;
+
+  try {
+    const raw = await callAI([{ role:'user', content: regenPrompt }], true);
+    thinking.remove();
+
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (!m) throw new Error('返回格式有误，请重试');
+    const opts = JSON.parse(m[0]);
+    if (!Array.isArray(opts) || opts.length === 0) throw new Error('未生成有效方案');
+
+    S.conceptOptions = opts;
+    S.selectedConceptIdx = 0;
+
+    // 更新三个 tab 卡片的名称
+    opts.forEach((opt, i) => {
+      const nameEl = document.getElementById(`copt-name-${i}`);
+      if (nameEl) nameEl.textContent = opt.theme_name || `方案${i+1}`;
+    });
+    [0,1,2].forEach(i => document.getElementById(`copt-${i}`)?.classList.toggle('active', i===0));
+
+    // 选中并显示第一个方案
+    selectConceptOption(0);
+
+    toast('已生成三个新方案，点击选择');
+
+  } catch(err) {
+    thinking.remove();
+    addMsg('concept', 'ai', `⚠️ 生成失败：${err.message}\n\n请检查网络或 API Key 后重试。`);
+    toast('生成失败：' + err.message);
+  }
+
+  btn.disabled = false; btn.textContent = '换一批方案';
 }
 
 /* ============================================================
