@@ -1103,15 +1103,23 @@ ${projBlock}${rawBlock}`;
 
 请结合项目特征（如三面环水/临农田/高层+别墅等），从"界面处理、空间营造、生态设计、功能植入、文化意境"等维度展开思考，推导出有针对性的景观策略。可以参考山水画论、中国园林哲学等文化视角来提升策略的文化高度。`,
 
-    concept: `\n\n**当前章节：设计构思 & 设计理念**
+    concept: `\n\n**当前章节：设计构思**
 
-这是整个文本最有灵魂的部分，需要设计师投入最多创意。
+设计构思是整个文本最有灵魂的部分——需要找到一个与这块地、这座城、这批建筑都高度契合的文化意象，并将其凝练为**四个字的核心主题**。
 
-**设计构思**：聚焦"我从哪里获得灵感"——可以是场地的自然特质（水、田、光影）、地域文化（江南、水乡）、某个具体意象（山水画、田园诗、折扇）。要有画面感，让读者感受到设计师的创作起点。
+**提炼四字主题的路径：**
+- 地域文化：项目所在地的历史典故、山水画派（如新安画派、吴门画派、金陵画派）、文人诗词、地方意象
+- 自然环境：场地的水系形态、植被特征、地形肌理，与中国传统自然观的对应关系
+- 建筑气质：建筑的风格、色彩、排布方式，对应的历史审美语境
+- 甲方意向：项目定位与目标客群的精神追求
 
-**设计理念**：是构思的升华，是项目的价值观宣言——"我们要为居住在这里的人创造什么样的生活方式和精神体验"。语言要有感染力、有高度，但不能空洞。
+**要求：**
+1. 四字主题要有独特性，避免"山水园林""天人合一"等过于通用的表达
+2. 主动说明：这四个字从何而来？与这个项目的关联性是什么？
+3. 可以引用一句相关的古典诗词或画论，增加文化厚度
+4. 设计师提供的地块地点、建筑风格、甲方定位，都是锁定文化方向的关键线索
 
-中国古典山水画论（三远法、可游可居可望）、江南园林哲学（借景、框景、藏露）、儒道文化（天人合一、隐逸精神）、现代生活方式研究，都是很好的思想来源。请帮助设计师找到与这个地块最契合的文化切入点，提炼出独特的主题意象。`,
+请主动从原始资料中提炼信息，给出你认为最能打动甲方、最有文化辨识度的构思方向。`,
 
     preview: `\n\n你正在协助设计师对已完成的景观文本进行整体审阅和优化。可以自由讨论——文本逻辑连贯性、语言表达、文化深度、篇幅调整、章节衔接等任何问题。`,
   };
@@ -1229,10 +1237,19 @@ function applyChapter(chapter) {
       });
     S.applied.strategy = { title: '设计策略', content: items.length ? items.join('\n') : content };
   } else if (key === 'concept') {
-    // 构思：全文作为 concept.content，theme 暂不拆分
+    // 构思：从对话文本中尝试提取四字核心主题，存为 theme_name
     const kws = extractKeywords(content);
-    S.applied.concept = { title: '设计构思', content, keywords: kws };
-    // 保留现有 theme 或清空（让用户单独处理 theme 页）
+    // 尝试从 AI 回复中提取四字主题（常见格式：**XXXX**、「XXXX」、【XXXX】、核心主题：XXXX）
+    function _extractThemeName(text) {
+      let m;
+      m = text.match(/\*\*([\u4e00-\u9fff]{4})\*\*/);          if (m) return m[1]; // **四字**
+      m = text.match(/[「【"『]([\u4e00-\u9fff]{4})[」】"』]/); if (m) return m[1]; // 「四字」
+      m = text.match(/(?:核心主题|主题名|主题)[：:]\s*([\u4e00-\u9fff]{4})/); if (m) return m[1];
+      return null;
+    }
+    const theme_name = _extractThemeName(content);
+    S.applied.concept = { title: '设计构思', content, keywords: kws, ...(theme_name ? { theme_name } : {}) };
+    // 保留现有 theme 不覆盖（让用户通过一键生成或单独对话更新理念页）
   } else {
     S.applied[key] = { title: CHAPTER_TITLES[key] || key, content, keywords: extractKeywords(content) };
   }
@@ -1523,7 +1540,8 @@ const PAGE_RENDERERS = {
         <div>${slot('100%','100%','灵感图 3')}</div>
         <div>${slot('100%','100%','灵感图 4')}</div>
         <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.94);backdrop-filter:blur(12px);border-radius:${Math.round(10*z)}px;padding:${Math.round(16*z)}px ${Math.round(20*z)}px;max-width:${Math.round(iw*0.48)}px;text-align:center;box-shadow:0 ${Math.round(4*z)}px ${Math.round(20*z)}px rgba(0,0,0,0.1);">
-          <div style="font-size:${Math.round(9*z)}px;font-weight:600;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:${Math.round(8*z)}px;">CONCEPT</div>
+          <div style="font-size:${Math.round(9*z)}px;font-weight:600;letter-spacing:2px;color:#888;text-transform:uppercase;margin-bottom:${Math.round(6*z)}px;">CONCEPT</div>
+          ${d.theme_name ? `<div style="font-size:${Math.round(20*z)}px;font-weight:700;letter-spacing:${Math.round(5*z)}px;color:#1d1d1f;margin-bottom:${Math.round(10*z)}px;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${d.theme_name}</div>` : ''}
           <div style="font-size:${Math.round(11*z)}px;line-height:1.85;color:#2a2a2a;">${fmtContent(d.content)||'设计灵感源于自然山水与人文历史的交融，以景抒情，以园述史。'}</div>
         </div>
       </div>
@@ -1749,8 +1767,14 @@ ${rawText}
 严格返回以下 JSON，不要任何额外文字：
 {
   "strategy": { "items":[ { "name":"策略名（4-8字）", "desc":"一句话说明（25-40字）" } ] },
-  "concept":  { "content":"150-200字构思说明，阐述设计灵感与空间叙事主题", "keywords":["意向图关键词1","意向图关键词2","意向图关键词3"] },
-  "theme":    { "content":"150-200字理念阐述，语言有感染力与高度" }
+  "concept":  {
+    "theme_name": "四字核心主题（须与项目所在地地域文化/场地特征/建筑气质高度契合，不可用通用词）",
+    "content": "120-180字：①主题来源——点明相关的地域山水画派或古典诗句，说明文化背景 ②主题与本项目的关联性——为何这四个字最能代表这个地块 ③由此生发的空间叙事构想方向",
+    "keywords": ["意向图关键词1（与山水画/地域意象相关）","意向图关键词2","意向图关键词3"]
+  },
+  "theme": {
+    "content": "3-5句精炼理念宣言（总字数60-100字），以设计构思主题为核心，描述这个景观将为居住者创造怎样的精神体验与生活方式，语言凝练、有感染力，可引用诗词意境收尾"
+  }
 }
 策略条数：3-4条。`;
 
@@ -1797,7 +1821,12 @@ ${rawText}
     }
     if (dB.concept) {
       S.applied.concept = { title:'设计构思', ...dB.concept };
-      S.chats.concept = [{ role:'assistant', content: dB.concept.content || '' }];
+      // 注入聊天记录：在内容前加上主题名，让用户在对话中能看到提炼结果
+      const conceptChatMsg = dB.concept.theme_name
+        ? `**${dB.concept.theme_name}**\n\n${dB.concept.content || ''}`
+        : (dB.concept.content || '');
+      S.chats.concept = [{ role:'assistant', content: conceptChatMsg }];
+      S.chatHTML.concept = _buildChatMsgHTML(conceptChatMsg);
     }
     if (dB.theme) { S.applied.theme = { title:'设计理念', ...dB.theme }; }
 
