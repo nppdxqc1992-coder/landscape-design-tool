@@ -131,6 +131,19 @@ html, body {
 .sub-tab.active { background: var(--accent); color: #fff; }
 .sub-tab.done::after { content: ' ✓'; }
 
+/* ---- 设计构思方案选择卡片 ---- */
+.concept-opts-bar { padding: 12px 16px 8px; flex-shrink: 0; border-bottom: 1px solid var(--bg); }
+.concept-opts-bar .opts-hint { font-size: 11px; color: var(--text-3); margin-bottom: 8px; }
+.concept-opts-bar .opts-row { display: flex; gap: 8px; }
+.concept-opt {
+  flex: 1; padding: 9px 8px 8px; border-radius: 10px; border: 1.5px solid var(--border);
+  cursor: pointer; text-align: center; transition: all 0.2s; background: var(--surface);
+}
+.concept-opt:hover { border-color: var(--accent); }
+.concept-opt.active { border-color: var(--accent); background: rgba(0,122,255,0.07); }
+.concept-opt .copt-num { font-size: 10px; color: var(--text-3); margin-bottom: 4px; }
+.concept-opt .copt-name { font-size: 13px; font-weight: 700; color: var(--text-1); letter-spacing: 3px; }
+
 /* ---- 对话区 ---- */
 .chat-history {
   flex: 1; overflow-y: auto; padding: 16px 20px;
@@ -548,6 +561,24 @@ html, body {
 
       <!-- 文字构思对话 -->
       <div id="concept-text-panel" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+        <!-- 三个方案选择卡片（一键生成后出现） -->
+        <div class="concept-opts-bar" id="concept-opts-bar" style="display:none;">
+          <div class="opts-hint">AI 生成了三个构思方向，点击选择 · 可在下方对话继续优化</div>
+          <div class="opts-row">
+            <div class="concept-opt active" id="copt-0" onclick="selectConceptOption(0)">
+              <div class="copt-num">方案一</div>
+              <div class="copt-name" id="copt-name-0">——</div>
+            </div>
+            <div class="concept-opt" id="copt-1" onclick="selectConceptOption(1)">
+              <div class="copt-num">方案二</div>
+              <div class="copt-name" id="copt-name-1">——</div>
+            </div>
+            <div class="concept-opt" id="copt-2" onclick="selectConceptOption(2)">
+              <div class="copt-num">方案三</div>
+              <div class="copt-name" id="copt-name-2">——</div>
+            </div>
+          </div>
+        </div>
         <div class="chat-history" id="chat-concept">
           <div class="chat-empty">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
@@ -714,6 +745,8 @@ const S = {
   currentScreen: 'project',
   analysisTab: 'location',
   conceptTab: 'text',
+  conceptOptions: [],       // 三个构思方案 [{theme_name,content,keywords,zones}, ...]
+  selectedConceptIdx: 0,    // 当前选中的方案序号
 
   // 项目信息
   info: { name:'', location:'', type:'', client:'', rawText:'', imageData: null },
@@ -722,8 +755,8 @@ const S = {
   // 前期分析四个子标签各自独立；preview 为自由对话
   chats: { location:[], site:[], building:[], general:[], strategy:[], concept:[], preview:[] },
 
-  // 前期分析子标签切换时，保存各自的聊天 DOM HTML
-  chatHTML: { location:'', site:'', building:'', general:'' },
+  // 各章节聊天 DOM 缓存（切换标签时还原）
+  chatHTML: { location:'', site:'', building:'', general:'', strategy:'', concept:'' },
 
   // AI 最新一次返回的解析结果（供"应用"按钮读取）
   rawResponses: { location:null, site:null, building:null, general:null, strategy:null, concept:null },
@@ -838,6 +871,38 @@ function switchAnalysisTab(tab) {
   document.getElementById('apply-analysis').disabled = !hasAIReply;
 
   updatePreview('analysis');
+}
+
+/* ============================================================
+   设计构思——切换三个构思方案
+   点击卡片：高亮选中 → 更新聊天区 → 更新预览（概念页+理念分区页）
+============================================================ */
+function selectConceptOption(idx) {
+  const opts = S.conceptOptions;
+  if (!opts || idx >= opts.length) return;
+  S.selectedConceptIdx = idx;
+
+  // 更新卡片高亮
+  [0, 1, 2].forEach(i => document.getElementById(`copt-${i}`)?.classList.toggle('active', i === idx));
+
+  const opt = opts[idx];
+
+  // 更新聊天区显示为选中方案的内容
+  const chatMsg = opt.theme_name ? `**${opt.theme_name}**\n\n${opt.content || ''}` : (opt.content || '');
+  S.chats.concept = [{ role: 'assistant', content: chatMsg }];
+  S.chatHTML.concept = _buildChatMsgHTML(chatMsg);
+  const chatEl = document.getElementById('chat-concept');
+  if (chatEl) chatEl.innerHTML = S.chatHTML.concept;
+
+  // 更新 applied：概念页 + 理念分区页
+  S.applied.concept = { title: '设计构思', ...opt };
+  if (opt.zones?.length) {
+    S.applied.theme = { title: '设计理念', theme_name: opt.theme_name, zones: opt.zones };
+  }
+
+  // 启用应用按钮 + 刷新预览
+  document.getElementById('apply-concept')?.removeAttribute('disabled');
+  renderPreviewPages();
 }
 
 /* ============================================================
@@ -1228,33 +1293,40 @@ function applyChapter(chapter) {
   // 写入 S.applied（按章节类型处理）
   if (key === 'strategy') {
     // 策略：将编号列表解析为 "策略名：描述" 每行
+    // 策略：从对话文本中解析 "问题→策略名：解法" 或 "策略名：解法" 格式，存为 items 数组
     const lines = content.split('\n').map(l => l.trim()).filter(l => l);
-    const items = lines
-      .filter(l => /^\d/.test(l))
-      .map(l => {
-        const cleaned = l.replace(/^\d+[\.\、]\s*/, '');
-        const sep = cleaned.indexOf('：') > -1 ? '：' : (cleaned.indexOf(':') > -1 ? ':' : null);
-        if (sep) {
-          const i = cleaned.indexOf(sep);
-          return `${cleaned.slice(0, i).trim()}：${cleaned.slice(i+1).trim()}`;
-        }
-        return cleaned;
-      });
-    S.applied.strategy = { title: '设计策略', content: items.length ? items.join('\n') : content };
+    const numbered = lines.filter(l => /^\d/.test(l));
+    const parseLines = numbered.length >= 2 ? numbered : lines.filter(l => l.length > 2);
+    const stratItems = parseLines.map(l => {
+      const raw = l.replace(/^\d+[\.\、]\s*/, '');
+      const arrowI = raw.indexOf('→') > -1 ? raw.indexOf('→') : (raw.indexOf('->') > -1 ? raw.indexOf('->') : -1);
+      let problem = '', rest = raw;
+      if (arrowI > -1) { problem = raw.slice(0, arrowI).trim(); rest = raw.slice(arrowI + 1).trim(); }
+      const colonI = rest.indexOf('：') > -1 ? rest.indexOf('：') : (rest.indexOf(':') > -1 ? rest.indexOf(':') : -1);
+      if (colonI > -1) return { problem, name: rest.slice(0, colonI).trim(), desc: rest.slice(colonI+1).trim() };
+      return { problem, name: rest, desc: '' };
+    });
+    S.applied.strategy = { title: '设计策略', items: stratItems.length ? stratItems : [] };
+
   } else if (key === 'concept') {
-    // 构思：从对话文本中尝试提取四字核心主题，存为 theme_name
+    // 构思：从对话文本中尝试提取四字核心主题，同步更新理念分区（若有当前选中方案）
     const kws = extractKeywords(content);
-    // 尝试从 AI 回复中提取四字主题（常见格式：**XXXX**、「XXXX」、【XXXX】、核心主题：XXXX）
     function _extractThemeName(text) {
       let m;
-      m = text.match(/\*\*([\u4e00-\u9fff]{4})\*\*/);          if (m) return m[1]; // **四字**
-      m = text.match(/[「【"『]([\u4e00-\u9fff]{4})[」】"』]/); if (m) return m[1]; // 「四字」
+      m = text.match(/\*\*([\u4e00-\u9fff]{4})\*\*/);          if (m) return m[1];
+      m = text.match(/[「【"『]([\u4e00-\u9fff]{4})[」】"』]/); if (m) return m[1];
       m = text.match(/(?:核心主题|主题名|主题)[：:]\s*([\u4e00-\u9fff]{4})/); if (m) return m[1];
       return null;
     }
     const theme_name = _extractThemeName(content);
     S.applied.concept = { title: '设计构思', content, keywords: kws, ...(theme_name ? { theme_name } : {}) };
-    // 保留现有 theme 不覆盖（让用户通过一键生成或单独对话更新理念页）
+    // 若当前选中方案有 zones，同步保持理念页分区（不覆盖 theme_name）
+    const selOpt = S.conceptOptions[S.selectedConceptIdx];
+    if (selOpt?.zones?.length && !S.applied.theme?.zones?.length) {
+      S.applied.theme = { title: '设计理念', theme_name: theme_name || selOpt.theme_name, zones: selOpt.zones };
+    } else if (theme_name && S.applied.theme) {
+      S.applied.theme.theme_name = theme_name; // 若主题名更新了，同步到理念页
+    }
   } else {
     S.applied[key] = { title: CHAPTER_TITLES[key] || key, content, keywords: extractKeywords(content) };
   }
@@ -1515,19 +1587,27 @@ const PAGE_RENDERERS = {
   },
 
   strategy: (pw,ph,mg,iw,ih) => {
-    const z=S.zoom; const d=S.applied.strategy||{title:'设计策略',content:'',keywords:[]};
-    const items = d.content
-      ? d.content.split('\n').filter(l=>l.trim()).map(l=>{ const i=l.indexOf('：')>-1?l.indexOf('：'):l.indexOf(':'); return i>-1?{name:l.slice(0,i).trim(),desc:l.slice(i+1).trim()}:{name:l.trim(),desc:''}; })
-      : [{name:'生态优先策略',desc:'修复场地生态基底'},{name:'活力注入策略',desc:'引入多元化活动场所'},{name:'文化织入策略',desc:'传递场所精神'}];
-    const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
+    const z=S.zoom; const d=S.applied.strategy||{title:'设计策略', items:[]};
+    // 兼容新格式 items:[{problem,name,desc}] 和旧格式 content 字符串
+    const items = d.items?.length ? d.items
+      : (d.content ? d.content.split('\n').filter(l=>l.trim()).map(l=>{
+          const arrowI = l.indexOf('→')>-1 ? l.indexOf('→') : -1;
+          let problem='', rest=l;
+          if(arrowI>-1){problem=l.slice(0,arrowI).trim();rest=l.slice(arrowI+1).trim();}
+          const ci=rest.indexOf('：')>-1?rest.indexOf('：'):(rest.indexOf(':')>-1?rest.indexOf(':'):-1);
+          return ci>-1?{problem,name:rest.slice(0,ci).trim(),desc:rest.slice(ci+1).trim()}:{problem,name:rest,desc:''};
+        })
+      : [{problem:'路线平直单调',name:'曲径通幽',desc:'以蜿蜒游径打破轴线，引导发现空间趣味'},{problem:'界面生硬封闭',name:'借景入园',desc:'通过框景与开口，引入周边山水自然意境'},{problem:'功能空间割裂',name:'动静相宜',desc:'合理分配动态活动区与静谧休憩区，收放有序'}]);
+    const lw=Math.round(iw*0.55); const rw=iw-lw-Math.round(mg*0.35);
     return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
       ${hdr(d.title||'设计策略','DESIGN STRATEGY',mg)}
       <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
         <div style="width:${lw}px;">${slot(lw,'100%','策略分析图')}</div>
-        <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.35)}px;overflow:hidden;">
-          ${items.map((it,i)=>`<div style="padding:${Math.round(mg*0.2)}px 0;border-bottom:${Math.round(1*z)}px solid #ebebeb;">
-            <div style="font-size:${Math.round(11.5*z)}px;font-weight:600;color:#1d1d1f;margin-bottom:${Math.round(3*z)}px;">${String.fromCharCode(65+i)}. ${it.name}</div>
-            <div style="font-size:${Math.round(10.5*z)}px;color:#6e6e73;line-height:1.6;">${it.desc}</div>
+        <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.3)}px;overflow:hidden;">
+          ${items.map((it,i)=>`<div style="padding:${Math.round(mg*0.18)}px 0;border-bottom:${Math.round(1*z)}px solid #ebebeb;">
+            ${it.problem?`<div style="font-size:${Math.round(9*z)}px;color:#aaa;margin-bottom:${Math.round(3*z)}px;letter-spacing:0.5px;">▶ ${it.problem}</div>`:''}
+            <div style="font-size:${Math.round(11.5*z)}px;font-weight:700;color:#1d1d1f;margin-bottom:${Math.round(3*z)}px;letter-spacing:${Math.round(1*z)}px;">${String.fromCharCode(65+i)}. ${it.name}</div>
+            <div style="font-size:${Math.round(10*z)}px;color:#6e6e73;line-height:1.65;">${it.desc}</div>
           </div>`).join('')}
         </div>
       </div>
@@ -1554,24 +1634,31 @@ const PAGE_RENDERERS = {
   },
 
   theme: (pw,ph,mg,iw,ih) => {
-    const z=S.zoom; const d=S.applied.theme||{title:'设计理念',content:''};
-    const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
-    const gap=Math.round(mg*0.25);
+    const z=S.zoom; const d=S.applied.theme||{title:'设计理念', theme_name:'', zones:[]};
+    const gap=Math.round(mg*0.22);
+    // 使用 zones 数组（5-6个分区主题），或默认占位
+    const zones = d.zones?.length ? d.zones : [
+      {name:'春华坡',note:'自然生长'},
+      {name:'玉兰苑',note:'含蓄内秀'},
+      {name:'竹影廊',note:'清幽婉转'},
+      {name:'水月台',note:'澄静如镜'},
+      {name:'雅集园',note:'人文积淀'},
+    ];
+    const cols = Math.min(zones.length, 6);
     return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
       ${hdr(d.title||'设计理念','DESIGN PHILOSOPHY',mg)}
-      <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
-        <div style="width:${lw}px;display:flex;flex-direction:column;gap:${gap}px;">
-          ${slot(lw,'62%','概念意向图')}
-          <div style="flex:1;display:flex;gap:${gap}px;">
-            <div style="flex:1;">${slot('100%','100%','意向图 1')}</div>
-            <div style="flex:1;">${slot('100%','100%','意向图 2')}</div>
+      <div style="margin-bottom:${Math.round(mg*0.25)}px;display:flex;align-items:baseline;gap:${Math.round(mg*0.3)}px;">
+        ${d.theme_name?`<span style="font-size:${Math.round(19*z)}px;font-weight:700;letter-spacing:${Math.round(5*z)}px;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${d.theme_name}</span>`:''}
+        ${d.content?`<span style="font-size:${Math.round(9.5*z)}px;color:#999;line-height:1.5;flex:1;">${(d.content||'').slice(0,80)}${d.content?.length>80?'…':''}</span>`:''}
+      </div>
+      <div style="flex:1;display:grid;grid-template-columns:repeat(${cols},1fr);gap:${gap}px;min-height:0;">
+        ${zones.map(zn=>`<div style="display:flex;flex-direction:column;gap:${Math.round(gap*0.5)}px;">
+          <div style="flex:1;">${slot('100%','100%',zn.name)}</div>
+          <div style="text-align:center;padding:${Math.round(3*z)}px 0 ${Math.round(2*z)}px;">
+            <div style="font-size:${Math.round(11*z)}px;font-weight:700;color:#1d1d1f;letter-spacing:${Math.round(2*z)}px;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${zn.name}</div>
+            ${zn.note?`<div style="font-size:${Math.round(8.5*z)}px;color:#aaa;margin-top:${Math.round(2*z)}px;">${zn.note}</div>`:''}
           </div>
-        </div>
-        <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.4)}px;">
-          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">
-            ${fmtContent(d.content)||'以"共生"为核心理念，打造人与自然和谐共处的生态景观空间。'}
-          </div>
-        </div>
+        </div>`).join('')}
       </div>
     </div>`;
   },
@@ -1765,23 +1852,29 @@ ${rawText}
   "general":  { "content":"只列数据，格式：数据名：数值（含单位），一行一条，不加任何标注符号", "stats":{ "用地面积":"数值+单位或—", "景观面积":"数值+单位或—", "绿化率":"百分比或—", "容积率":"数值或—", "建筑密度":"百分比或—", "停车位数":"数值或—" } }
 }`;
 
-  // ── 请求 B：策略+构思+理念（创意驱动，只需项目概要） ──
+  // ── 请求 B：策略+构思（创意驱动，只需项目概要） ──
   const promptB = `你是专业景观设计文案师。
 项目概况：${rawText.slice(0, 2000)}
 
 严格返回以下 JSON，不要任何额外文字：
 {
-  "strategy": { "items":[ { "name":"策略名（4-8字）", "desc":"一句话说明（25-40字）" } ] },
-  "concept":  {
-    "theme_name": "四字核心主题（须与项目所在地地域文化/场地特征/建筑气质高度契合，不可用通用词）",
-    "content": "120-180字：①主题来源——点明相关的地域山水画派或古典诗句，说明文化背景 ②主题与本项目的关联性——为何这四个字最能代表这个地块 ③由此生发的空间叙事构想方向",
-    "keywords": ["意向图关键词1（与山水画/地域意象相关）","意向图关键词2","意向图关键词3"]
+  "strategy": {
+    "items": [
+      { "problem": "场地核心问题（4-8字，客观描述现状矛盾，如"路线平直单调"）", "name": "策略名（2-5字，对应解法的核心意象，如"曲径通幽"）", "desc": "解法说明（15-30字，说清楚怎么做）" }
+    ]
   },
-  "theme": {
-    "content": "3-5句精炼理念宣言（总字数60-100字），以设计构思主题为核心，描述这个景观将为居住者创造怎样的精神体验与生活方式，语言凝练、有感染力，可引用诗词意境收尾"
-  }
+  "concept": [
+    {
+      "theme_name": "四字主题①（须与项目地域文化/场地/建筑气质高度契合，不可用通用词）",
+      "content": "100-140字：①主题来源（引用相关地域山水画派或古典诗句） ②与本项目的关联性 ③空间叙事方向",
+      "keywords": ["搜图关键词1","搜图关键词2","搜图关键词3"],
+      "zones": [ { "name": "景区名（2-4字）", "note": "与主题关联（8字内）" } ]
+    },
+    { "theme_name":"四字主题②（与①完全不同的文化切入角度）", "content":"100-140字", "keywords":["词1","词2","词3"], "zones":[{"name":"景区名","note":"关联"}] },
+    { "theme_name":"四字主题③（第三种文化视角）", "content":"100-140字", "keywords":["词1","词2","词3"], "zones":[{"name":"景区名","note":"关联"}] }
+  ]
 }
-策略条数：3-4条。`;
+注意：strategy共3-4条；concept每个方案zones共5-6个景区；三个方案主题须完全不同、各有鲜明文化辨识度。`;
 
   try {
     // 两路并行，速度约为串行的一半
@@ -1820,21 +1913,46 @@ ${rawText}
 
     // ③ 写入创意章节（来自 B）
     if (dB.strategy) {
-      const items = (dB.strategy.items || []).map(it => `${it.name}：${it.desc}`).join('\n');
-      S.applied.strategy = { title:'设计策略', content: items };
-      S.chats.strategy = [{ role:'assistant', content: items }];
-      S.chatHTML.strategy = _buildChatMsgHTML(items); // 缓存 DOM，供切换时恢复
+      // 新格式：存储 items 数组 {problem, name, desc}，渲染时直接使用
+      S.applied.strategy = { title:'设计策略', items: dB.strategy.items || [] };
+      // 聊天记录：用 "问题 → 策略名：解法" 格式显示
+      const stratTxt = (dB.strategy.items||[]).map(it =>
+        it.problem ? `${it.problem} → ${it.name}：${it.desc}` : `${it.name}：${it.desc}`
+      ).join('\n');
+      S.chats.strategy = [{ role:'assistant', content: stratTxt }];
+      S.chatHTML.strategy = _buildChatMsgHTML(stratTxt);
     }
-    if (dB.concept) {
-      S.applied.concept = { title:'设计构思', ...dB.concept };
-      // 注入聊天记录：在内容前加上主题名，让用户在对话中能看到提炼结果
-      const conceptChatMsg = dB.concept.theme_name
-        ? `**${dB.concept.theme_name}**\n\n${dB.concept.content || ''}`
-        : (dB.concept.content || '');
-      S.chats.concept = [{ role:'assistant', content: conceptChatMsg }];
-      S.chatHTML.concept = _buildChatMsgHTML(conceptChatMsg);
+
+    // 构思：concept 现在是三个方案的数组
+    const conceptArr = Array.isArray(dB.concept) ? dB.concept : (dB.concept ? [dB.concept] : []);
+    if (conceptArr.length > 0) {
+      S.conceptOptions = conceptArr;
+      S.selectedConceptIdx = 0;
+
+      // 更新三个方案卡片的标题
+      const bar = document.getElementById('concept-opts-bar');
+      if (bar) {
+        bar.style.display = 'block';
+        conceptArr.forEach((opt, i) => {
+          const nameEl = document.getElementById(`copt-name-${i}`);
+          if (nameEl) nameEl.textContent = opt.theme_name || `方案${i+1}`;
+        });
+        // 默认选中第一个
+        [0,1,2].forEach(i => document.getElementById(`copt-${i}`)?.classList.toggle('active', i===0));
+      }
+
+      // 将第一个方案应用到预览
+      const first = conceptArr[0];
+      S.applied.concept = { title:'设计构思', ...first };
+      if (first.zones?.length) {
+        S.applied.theme = { title:'设计理念', theme_name: first.theme_name, zones: first.zones };
+      }
+
+      // 聊天区显示第一个方案内容
+      const msg0 = first.theme_name ? `**${first.theme_name}**\n\n${first.content||''}` : (first.content||'');
+      S.chats.concept = [{ role:'assistant', content: msg0 }];
+      S.chatHTML.concept = _buildChatMsgHTML(msg0);
     }
-    if (dB.theme) { S.applied.theme = { title:'设计理念', ...dB.theme }; }
 
     // ④ 标记导航标签完成
     ['analysis','strategy','concept'].forEach(ch =>
