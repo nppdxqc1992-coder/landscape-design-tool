@@ -574,13 +574,7 @@ html, body {
     <div class="screen" id="screen-concept">
       <div class="panel-head">
         <div class="panel-head-title">设计构思</div>
-        <div class="panel-head-sub">语言模型 + 图像生成，共同完成理念图与设计主题</div>
-      </div>
-
-      <!-- 子标签：文字 / 图像 -->
-      <div class="sub-tabs">
-        <button class="sub-tab active" id="csub-text" onclick="switchConceptTab('text')">文字构思</button>
-        <button class="sub-tab" id="csub-image" onclick="switchConceptTab('image')">理念图生成</button>
+        <div class="panel-head-sub">提炼四字核心主题，关联地域文化与设计意向</div>
       </div>
 
       <!-- 文字构思对话 -->
@@ -625,61 +619,35 @@ html, body {
         </div>
       </div>
 
-      <!-- 图像生成面板（占位） -->
-      <div id="concept-image-panel" style="display:none;flex:1;padding:20px;overflow-y:auto;">
-        <div style="background:var(--bg);border-radius:var(--radius);padding:16px;margin-bottom:14px;">
-          <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px;">图像生成模型</div>
-          <select class="form-select" id="image-model-select" style="font-size:12px;">
-            <option value="doubao">豆包（即梦 AI）</option>
-            <option value="comfyui">ComfyUI（本地）</option>
-            <option value="placeholder">更多模型接入中…</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label class="form-label">上传参考图 <span class="optional">可传多张</span></label>
-          <div class="upload-zone" onclick="document.getElementById('ref-image-input').click()">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            <p>上传参考图、意向图</p>
-          </div>
-          <input type="file" id="ref-image-input" accept="image/*" multiple style="display:none">
-        </div>
-        <div class="form-row">
-          <label class="form-label">生图提示词</label>
-          <textarea class="form-textarea" id="image-prompt" placeholder="将由文字构思对话自动填充，也可手动修改…" rows="4"></textarea>
-        </div>
-        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:4px;" onclick="toast('图像生成功能接入中，敬请期待')">
-          生成理念图（功能开发中）
-        </button>
-      </div>
     </div>
 
     <!-- ---- 屏幕5：全部预览 ---- -->
     <div class="screen" id="screen-preview">
       <div class="panel-head">
-        <div class="panel-head-title">全部预览 · 最终调整</div>
-        <div class="panel-head-sub">对右侧任意页面截图，在此输入修改指令</div>
+        <div class="panel-head-title">全部预览</div>
+        <div class="panel-head-sub">确认效果后导出 IDML，在 InDesign 中替换图片并精调</div>
       </div>
 
-      <div class="chat-history" id="chat-preview">
-        <div class="chat-empty">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-          <p>在此对话可直接修改任意页面内容<br>可截图右侧某区域后输入「修改这里的文字为…」</p>
+      <!-- 预览说明 -->
+      <div style="flex:1; display:flex; flex-direction:column; gap:12px; padding:20px 0 0;">
+        <div style="background:#f5f5f7; border-radius:10px; padding:16px; font-size:13px; color:#6e6e73; line-height:1.7;">
+          <div style="font-weight:600; color:#1d1d1f; margin-bottom:6px;">如需修改内容</div>
+          返回对应章节的对话框，直接输入修改要求即可。<br>
+          各章节均支持多轮对话反复调整。
+        </div>
+
+        <div style="background:#f5f5f7; border-radius:10px; padding:16px; font-size:13px; color:#6e6e73; line-height:1.7;">
+          <div style="font-weight:600; color:#1d1d1f; margin-bottom:6px;">导出后在 InDesign 中</div>
+          替换图片占位框 → 微调字体间距 → 最终出图
         </div>
       </div>
 
-      <div class="chat-input-area">
-        <div class="chat-input-wrap">
-          <textarea class="chat-input" id="input-preview" placeholder="截图某区域，描述修改内容…" rows="1" onkeydown="handleEnter(event,'preview')" oninput="autoResize(this)"></textarea>
-          <button class="btn-send" onclick="sendMsg('preview')" id="send-preview">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          </button>
-        </div>
-        <div style="margin-top:8px;">
-          <button class="btn btn-dark" style="width:100%;justify-content:center;" onclick="exportIDML()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            导出 IDML → InDesign
-          </button>
-        </div>
+      <!-- 导出按钮 -->
+      <div class="chat-input-area" style="border-top:none;">
+        <button class="btn btn-dark" style="width:100%;justify-content:center;" onclick="exportIDML()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          导出 IDML → InDesign
+        </button>
       </div>
     </div>
 
@@ -1164,13 +1132,6 @@ async function _bgGenZones(opt, idx) {
 /* ============================================================
    设计构思子标签切换
 ============================================================ */
-function switchConceptTab(tab) {
-  S.conceptTab = tab;
-  document.getElementById('csub-text').classList.toggle('active', tab === 'text');
-  document.getElementById('csub-image').classList.toggle('active', tab === 'image');
-  document.getElementById('concept-text-panel').style.display  = tab === 'text'  ? 'flex' : 'none';
-  document.getElementById('concept-image-panel').style.display = tab === 'image' ? 'block' : 'none';
-}
 
 /* ============================================================
    对话发送入口
@@ -1749,25 +1710,29 @@ function placeholderPage(pw, ph, mg, iw, ih, id) {
 
 /* ---- 各页面渲染函数 ---- */
 const PAGE_RENDERERS = {
+  // ---- 通用右侧文字列（章节名+标题+分隔线+正文+关键词，右对齐，与IDML一致） ----
+  // rightCol(d, z, rw, chapterLabel, kws) → HTML string
+
   location: (pw,ph,mg,iw,ih) => {
     const z=S.zoom; const d=S.applied.location||{title:'区位分析',content:'',keywords:[]};
-    const kws = d.keywords?.length ? d.keywords : ['区位优越','交通便利','配套完善'];
-    const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
-    return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
-      ${hdr('区位分析','LOCATION ANALYSIS',mg)}
-      <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
-        <div style="width:${lw}px;display:flex;flex-direction:column;gap:${Math.round(mg*0.25)}px;">
-          ${slot(lw,'65%','区位总图')}
-          <div style="flex:1;display:flex;gap:${Math.round(mg*0.25)}px;">
-            <div style="flex:1;">${slot('100%','100%','交通分析图')}</div>
-            <div style="flex:1;">${slot('100%','100%','周边配套图')}</div>
-          </div>
+    const kws=d.keywords?.length?d.keywords:['区位优越','交通便利','配套完善'];
+    const gap=Math.round(mg*0.25), hgap=Math.round(mg*0.35);
+    const lw=Math.round(iw*0.65), rw=iw-lw-hgap;
+    return `<div style="position:absolute;inset:${mg}px;display:flex;gap:${hgap}px;">
+      <div style="width:${lw}px;display:flex;flex-direction:column;gap:${gap}px;">
+        ${slot(lw,'65%','区位总图')}
+        <div style="flex:1;display:flex;gap:${gap}px;">
+          <div style="flex:1;">${slot('100%','100%','交通分析图')}</div>
+          <div style="flex:1;">${slot('100%','100%','周边配套图')}</div>
         </div>
-        <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.45)}px;">
-          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${fmtContent(d.content)||'项目位于城市核心区域，地理位置优越，周边配套完善。'}</div>
-          <div style="display:flex;flex-direction:column;gap:${Math.round(7*z)}px;">
-            ${kws.map(k=>`<div style="display:flex;align-items:center;justify-content:flex-end;gap:${Math.round(7*z)}px;"><span style="font-size:${Math.round(20*z)}px;color:#3a3a3c;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${k}</span><div style="width:${Math.round(4*z)}px;height:${Math.round(4*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div></div>`).join('')}
-          </div>
+      </div>
+      <div style="width:${rw}px;display:flex;flex-direction:column;gap:${Math.round(5*z)}px;overflow:hidden;">
+        <div style="font-size:${Math.round(7.5*z)}px;color:#aeaeb2;text-align:right;letter-spacing:0.5px;">Chapter 01 · 前期分析</div>
+        <div style="font-size:${Math.round(18*z)}px;font-weight:700;color:#1d1d1f;text-align:right;line-height:1.2;">${d.title||'区位分析'}</div>
+        <div style="height:${Math.round(1*z)}px;background:#e0e0e0;flex-shrink:0;"></div>
+        <div style="font-size:${Math.round(10*z)}px;line-height:1.75;color:#1d1d1f;text-align:right;flex:1;overflow:hidden;">${fmtContent(d.content)||'项目位于城市核心区域，地理位置优越，周边配套完善。'}</div>
+        <div style="display:flex;flex-direction:column;gap:${Math.round(4*z)}px;">
+          ${kws.map(k=>`<div style="display:flex;align-items:center;justify-content:flex-end;gap:${Math.round(5*z)}px;"><span style="font-size:${Math.round(9*z)}px;font-weight:700;color:#3a3a3c;">${k}</span><div style="width:${Math.round(3*z)}px;height:${Math.round(3*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div></div>`).join('')}
         </div>
       </div>
     </div>`;
@@ -1776,49 +1741,50 @@ const PAGE_RENDERERS = {
   site: (pw,ph,mg,iw,ih) => {
     const z=S.zoom; const d=S.applied.site||{title:'场地现状',content:'',keywords:[]};
     const kws=d.keywords?.length?d.keywords:['地形平缓','植被丰富','水体资源'];
-    const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
-    const gap=Math.round(mg*0.25);
-    return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
-      ${hdr('场地现状','SITE ANALYSIS',mg)}
-      <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
-        <div style="width:${lw}px;display:flex;flex-direction:column;gap:${gap}px;">
-          ${slot(lw,'62%','场地全景图')}
-          <div style="flex:1;display:flex;gap:${gap}px;">
-            <div style="flex:1;">${slot('100%','100%','地形分析')}</div>
-            <div style="flex:1;">${slot('100%','100%','植被现状')}</div>
-            <div style="flex:1;">${slot('100%','100%','周边环境')}</div>
-          </div>
+    const gap=Math.round(mg*0.25), hgap=Math.round(mg*0.35);
+    const lw=Math.round(iw*0.65), rw=iw-lw-hgap;
+    return `<div style="position:absolute;inset:${mg}px;display:flex;gap:${hgap}px;">
+      <div style="width:${lw}px;display:flex;flex-direction:column;gap:${gap}px;">
+        ${slot(lw,'62%','场地全景图')}
+        <div style="flex:1;display:flex;gap:${gap}px;">
+          <div style="flex:1;">${slot('100%','100%','地形分析')}</div>
+          <div style="flex:1;">${slot('100%','100%','植被现状')}</div>
+          <div style="flex:1;">${slot('100%','100%','周边环境')}</div>
         </div>
-        <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.45)}px;">
-          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${fmtContent(d.content)||'场地地势平坦，植被覆盖良好，东侧有现状水体。'}</div>
-          <div style="display:flex;flex-direction:column;gap:${Math.round(7*z)}px;">
-            ${kws.map(k=>`<div style="display:flex;align-items:center;justify-content:flex-end;gap:${Math.round(7*z)}px;"><span style="font-size:${Math.round(20*z)}px;color:#3a3a3c;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${k}</span><div style="width:${Math.round(4*z)}px;height:${Math.round(4*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div></div>`).join('')}
-          </div>
+      </div>
+      <div style="width:${rw}px;display:flex;flex-direction:column;gap:${Math.round(5*z)}px;overflow:hidden;">
+        <div style="font-size:${Math.round(7.5*z)}px;color:#aeaeb2;text-align:right;letter-spacing:0.5px;">Chapter 01 · 前期分析</div>
+        <div style="font-size:${Math.round(18*z)}px;font-weight:700;color:#1d1d1f;text-align:right;line-height:1.2;">${d.title||'场地现状'}</div>
+        <div style="height:${Math.round(1*z)}px;background:#e0e0e0;flex-shrink:0;"></div>
+        <div style="font-size:${Math.round(10*z)}px;line-height:1.75;color:#1d1d1f;text-align:right;flex:1;overflow:hidden;">${fmtContent(d.content)||'场地地势平坦，植被覆盖良好，东侧有现状水体。'}</div>
+        <div style="display:flex;flex-direction:column;gap:${Math.round(4*z)}px;">
+          ${kws.map(k=>`<div style="display:flex;align-items:center;justify-content:flex-end;gap:${Math.round(5*z)}px;"><span style="font-size:${Math.round(9*z)}px;font-weight:700;color:#3a3a3c;">${k}</span><div style="width:${Math.round(3*z)}px;height:${Math.round(3*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div></div>`).join('')}
         </div>
       </div>
     </div>`;
   },
 
   building: (pw,ph,mg,iw,ih) => {
+    // 建筑分析：文字左34% + 图片右66%（与IDML text-left布局一致）
     const z=S.zoom; const d=S.applied.building||{title:'建筑分析',content:'',keywords:[]};
     const kws=d.keywords?.length?d.keywords:['现代简约','架空界面','围合中庭'];
-    const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
-    const gap=Math.round(mg*0.25);
-    return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
-      ${hdr('建筑分析','BUILDING ANALYSIS',mg)}
-      <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
-        <div style="width:${lw}px;display:flex;flex-direction:column;gap:${gap}px;">
-          ${slot(lw,'62%','建筑总体布局图')}
-          <div style="flex:1;display:flex;gap:${gap}px;">
-            <div style="flex:1;">${slot('100%','100%','建筑立面')}</div>
-            <div style="flex:1;">${slot('100%','100%','建筑细节')}</div>
-          </div>
+    const gap=Math.round(mg*0.25), hgap=Math.round(mg*0.35);
+    const txtW=Math.round(iw*0.34), imgW=iw-txtW-hgap;
+    return `<div style="position:absolute;inset:${mg}px;display:flex;gap:${hgap}px;">
+      <div style="width:${txtW}px;display:flex;flex-direction:column;gap:${Math.round(5*z)}px;overflow:hidden;">
+        <div style="font-size:${Math.round(7.5*z)}px;color:#aeaeb2;letter-spacing:0.5px;">Chapter 01 · 前期分析</div>
+        <div style="font-size:${Math.round(18*z)}px;font-weight:700;color:#1d1d1f;line-height:1.2;">${d.title||'建筑分析'}</div>
+        <div style="height:${Math.round(1*z)}px;background:#e0e0e0;flex-shrink:0;"></div>
+        <div style="font-size:${Math.round(10*z)}px;line-height:1.75;color:#1d1d1f;flex:1;overflow:hidden;">${fmtContent(d.content)||'建筑风格现代简约，底层架空处理，围合出中心绿地。'}</div>
+        <div style="display:flex;flex-direction:column;gap:${Math.round(4*z)}px;">
+          ${kws.map(k=>`<div style="display:flex;align-items:center;gap:${Math.round(5*z)}px;"><div style="width:${Math.round(3*z)}px;height:${Math.round(3*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div><span style="font-size:${Math.round(9*z)}px;font-weight:700;color:#3a3a3c;">${k}</span></div>`).join('')}
         </div>
-        <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.45)}px;">
-          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;">${fmtContent(d.content)||'建筑风格现代简约，底层架空处理，围合出中心绿地。'}</div>
-          <div style="display:flex;flex-direction:column;gap:${Math.round(7*z)}px;">
-            ${kws.map(k=>`<div style="display:flex;align-items:center;justify-content:flex-end;gap:${Math.round(7*z)}px;"><span style="font-size:${Math.round(20*z)}px;color:#3a3a3c;font-family:'Microsoft YaHei','PingFang SC',sans-serif;">${k}</span><div style="width:${Math.round(4*z)}px;height:${Math.round(4*z)}px;border-radius:50%;background:#1d1d1f;flex-shrink:0;"></div></div>`).join('')}
-          </div>
+      </div>
+      <div style="width:${imgW}px;display:flex;flex-direction:column;gap:${gap}px;">
+        ${slot(imgW,'57%','建筑总体布局图')}
+        <div style="flex:1;display:flex;gap:${gap}px;">
+          <div style="flex:1;">${slot('100%','100%','建筑立面')}</div>
+          <div style="flex:1;">${slot('100%','100%','建筑细节')}</div>
         </div>
       </div>
     </div>`;
@@ -1826,19 +1792,20 @@ const PAGE_RENDERERS = {
 
   general: (pw,ph,mg,iw,ih) => {
     const z=S.zoom; const d=S.applied.general||{};
-    const lw=Math.round(iw*0.65); const rw=iw-lw-Math.round(mg*0.35);
-    return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
-      ${hdr('工程概况','GENERAL OVERVIEW',mg)}
-      <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
-        <div style="width:${lw}px;">${slot(lw,'100%','总平面图 / 红线图')}</div>
-        <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:0;">
-          <div style="font-size:${Math.round(24*z)}px;line-height:1.8;color:#1d1d1f;font-family:'Microsoft YaHei','PingFang SC',sans-serif;text-align:right;margin-bottom:${Math.round(mg*0.3)}px;">${d.content||'工程概况包括：用地红线面积、景观设计面积、绿化率指标及相关规划条件等。'}</div>
-          ${['用地面积','景观面积','绿化率','容积率','建筑密度','停车位数'].map(k=>`
-          <div style="display:flex;justify-content:space-between;padding:${Math.round(7*z)}px 0;border-bottom:${Math.round(1*z)}px solid #e8e8e8;">
-            <span style="font-size:${Math.round(11*z)}px;color:#8e8e93;">${k}</span>
-            <span style="font-size:${Math.round(11*z)}px;font-weight:600;color:#1d1d1f;">${d.stats?.[k] || '—'}</span>
-          </div>`).join('')}
-        </div>
+    const hgap=Math.round(mg*0.35);
+    const lw=Math.round(iw*0.65), rw=iw-lw-hgap;
+    return `<div style="position:absolute;inset:${mg}px;display:flex;gap:${hgap}px;">
+      <div style="width:${lw}px;">${slot(lw,'100%','总平面图 / 红线图')}</div>
+      <div style="width:${rw}px;display:flex;flex-direction:column;gap:${Math.round(4*z)}px;">
+        <div style="font-size:${Math.round(7.5*z)}px;color:#aeaeb2;text-align:right;letter-spacing:0.5px;">Chapter 01 · 前期分析</div>
+        <div style="font-size:${Math.round(18*z)}px;font-weight:700;color:#1d1d1f;text-align:right;line-height:1.2;">工程概况</div>
+        <div style="height:${Math.round(1*z)}px;background:#e0e0e0;flex-shrink:0;"></div>
+        <div style="font-size:${Math.round(9.5*z)}px;line-height:1.7;color:#1d1d1f;text-align:right;margin-bottom:${Math.round(4*z)}px;">${d.content||'工程概况包括：用地红线面积、景观设计面积、绿化率指标及相关规划条件等。'}</div>
+        ${['用地面积','景观面积','绿化率','容积率','建筑密度','停车位数'].map(k=>`
+        <div style="display:flex;justify-content:space-between;padding:${Math.round(5*z)}px 0;border-bottom:${Math.round(1*z)}px solid #e8e8e8;">
+          <span style="font-size:${Math.round(9*z)}px;color:#8e8e93;">${k}</span>
+          <span style="font-size:${Math.round(9*z)}px;font-weight:600;color:#1d1d1f;">${d.stats?.[k]||'—'}</span>
+        </div>`).join('')}
       </div>
     </div>`;
   },
@@ -1855,18 +1822,19 @@ const PAGE_RENDERERS = {
           return ci>-1?{problem,name:rest.slice(0,ci).trim(),desc:rest.slice(ci+1).trim()}:{problem,name:rest,desc:''};
         })
       : [{problem:'路线平直单调',name:'曲径通幽',desc:'以蜿蜒游径打破轴线，引导发现空间趣味'},{problem:'界面生硬封闭',name:'借景入园',desc:'通过框景与开口，引入周边山水自然意境'},{problem:'功能空间割裂',name:'动静相宜',desc:'合理分配动态活动区与静谧休憩区，收放有序'}]);
-    const lw=Math.round(iw*0.55); const rw=iw-lw-Math.round(mg*0.35);
-    return `<div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
-      ${hdr(d.title||'设计策略','DESIGN STRATEGY',mg)}
-      <div style="flex:1;display:flex;gap:${Math.round(mg*0.35)}px;min-height:0;">
-        <div style="width:${lw}px;">${slot(lw,'100%','策略分析图')}</div>
-        <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.3)}px;overflow:hidden;">
-          ${items.map((it,i)=>`<div style="padding:${Math.round(mg*0.18)}px 0;border-bottom:${Math.round(1*z)}px solid #ebebeb;">
-            ${it.problem?`<div style="font-size:${Math.round(9*z)}px;color:#aaa;margin-bottom:${Math.round(3*z)}px;letter-spacing:0.5px;">▶ ${it.problem}</div>`:''}
-            <div style="font-size:${Math.round(11.5*z)}px;font-weight:700;color:#1d1d1f;margin-bottom:${Math.round(3*z)}px;letter-spacing:${Math.round(1*z)}px;">${String.fromCharCode(65+i)}. ${it.name}</div>
-            <div style="font-size:${Math.round(10*z)}px;color:#6e6e73;line-height:1.65;">${it.desc}</div>
-          </div>`).join('')}
-        </div>
+    const hgap=Math.round(mg*0.35);
+    const lw=Math.round(iw*0.55), rw=iw-lw-hgap;
+    return `<div style="position:absolute;inset:${mg}px;display:flex;gap:${hgap}px;">
+      <div style="width:${lw}px;">${slot(lw,'100%','策略分析图')}</div>
+      <div style="width:${rw}px;display:flex;flex-direction:column;gap:${Math.round(4*z)}px;overflow:hidden;">
+        <div style="font-size:${Math.round(7.5*z)}px;color:#aeaeb2;letter-spacing:0.5px;">Chapter 02 · 设计策略</div>
+        <div style="font-size:${Math.round(16*z)}px;font-weight:700;color:#1d1d1f;line-height:1.2;">${d.title||'设计策略'}</div>
+        <div style="height:${Math.round(1*z)}px;background:#e0e0e0;flex-shrink:0;margin-bottom:${Math.round(3*z)}px;"></div>
+        ${items.map((it,i)=>`<div style="padding:${Math.round(mg*0.14)}px 0;border-bottom:${Math.round(1*z)}px solid #ebebeb;">
+          ${it.problem?`<div style="font-size:${Math.round(8*z)}px;color:#aaa;margin-bottom:${Math.round(2*z)}px;letter-spacing:0.5px;">▶ ${it.problem}</div>`:''}
+          <div style="font-size:${Math.round(10.5*z)}px;font-weight:700;color:#1d1d1f;margin-bottom:${Math.round(2*z)}px;">${String.fromCharCode(65+i)}. ${it.name}</div>
+          <div style="font-size:${Math.round(9*z)}px;color:#6e6e73;line-height:1.6;">${it.desc}</div>
+        </div>`).join('')}
       </div>
     </div>`;
   },
@@ -2697,11 +2665,15 @@ function _buildStoryXML(storyId, pd) {
   const colorMap = { chapter:'Color/C=0 M=0 Y=0 K=60', title:'Color/C=0 M=0 Y=0 K=100', body:'Color/C=0 M=0 Y=0 K=85', kw:'Color/C=0 M=0 Y=0 K=80' };
   const sizeMap  = { chapter:'9', title:'24', body:'18', kw:'14' };
 
+  // 文字对齐：text-right/text-right-grid（区位/场地/工程概况）右对齐，其余左对齐，与浏览器预览一致
+  const isRightAlign = (pd.layout === 'text-right' || pd.layout === 'text-right-grid');
+  const justify = isRightAlign ? 'RightAlign' : 'LeftAlign';
+
   const makeParaXML = (styleKey, text) => {
     const fillColor = colorMap[styleKey] || 'Color/C=0 M=0 Y=0 K=100';
     const ptSize    = sizeMap[styleKey]  || '18';
     const isBold    = (styleKey === 'title' || styleKey === 'kw');
-    return `    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+    return `    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle" Justification="${justify}">
       <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"
         FontStyle="${isBold ? 'Bold' : 'Regular'}" PointSize="${ptSize}"
         Leading="${Math.round(+ptSize * 1.5)}" FillColor="${fillColor}">
