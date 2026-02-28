@@ -529,6 +529,25 @@ html, body {
         <div class="panel-head-sub">针对场地问题，逻辑推导景观设计的最优解</div>
       </div>
 
+      <!-- 策略方向选择条（生成后出现） -->
+      <div class="concept-opts-bar" id="strategy-opts-bar" style="display:none;">
+        <div class="opts-hint">点击选择策略方向 · 选中后在下方对话进一步优化 · 不满意可输入新要求后点「换一批」</div>
+        <div class="opts-row">
+          <div class="concept-opt active" id="sopt-0" onclick="selectStrategyOption(0)">
+            <div class="copt-num">方向一</div>
+            <div class="copt-name" id="sopt-name-0">——</div>
+          </div>
+          <div class="concept-opt" id="sopt-1" onclick="selectStrategyOption(1)">
+            <div class="copt-num">方向二</div>
+            <div class="copt-name" id="sopt-name-1">——</div>
+          </div>
+          <div class="concept-opt" id="sopt-2" onclick="selectStrategyOption(2)">
+            <div class="copt-num">方向三</div>
+            <div class="copt-name" id="sopt-name-2">——</div>
+          </div>
+        </div>
+      </div>
+
       <div class="chat-history" id="chat-strategy">
         <div class="chat-empty">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -538,12 +557,13 @@ html, body {
 
       <div class="chat-input-area">
         <div class="chat-input-wrap">
-          <textarea class="chat-input" id="input-strategy" placeholder="描述场地问题或修改策略方向…" rows="1" onkeydown="handleEnter(event,'strategy')" oninput="autoResize(this)"></textarea>
+          <textarea class="chat-input" id="input-strategy" placeholder="选中方向后在此优化…或填写新要求后点「换一批」" rows="1" onkeydown="handleEnter(event,'strategy')" oninput="autoResize(this)"></textarea>
           <button class="btn-send" onclick="sendMsg('strategy')" id="send-strategy">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         </div>
         <div class="input-actions">
+          <button class="btn-regen" id="btn-regen-strategy" onclick="regenStrategyOptions()" title="根据输入框要求重新生成三个策略方向">换一批策略</button>
           <button class="btn-apply" id="apply-strategy" onclick="applyChapter('strategy')" disabled>应用到预览</button>
           <button class="btn-clear-chat" onclick="clearChat('strategy')">清空对话</button>
         </div>
@@ -753,6 +773,8 @@ const S = {
   conceptTab: 'text',
   conceptOptions: [],       // 三个构思方案 [{theme_name,content,keywords,zones}, ...]
   selectedConceptIdx: 0,    // 当前选中的方案序号
+  strategyOptions: [],      // 三个策略方向 [{direction, items:[{problem,name,desc}]}, ...]
+  selectedStrategyIdx: 0,   // 当前选中的策略方向序号
 
   // 项目信息
   info: { name:'', location:'', type:'', client:'', rawText:'', imageData: null },
@@ -762,7 +784,7 @@ const S = {
   chats: { location:[], site:[], building:[], general:[], strategy:[], concept:[], preview:[] },
 
   // 各章节聊天 DOM 缓存（切换标签时还原）
-  chatHTML: { location:'', site:'', building:'', general:'', strategy:'', concept:'' },
+  chatHTML: { location:'', site:'', building:'', general:'', strategy:'', concept:'', strategyOpts:[] },
 
   // AI 最新一次返回的解析结果（供"应用"按钮读取）
   rawResponses: { location:null, site:null, building:null, general:null, strategy:null, concept:null },
@@ -877,6 +899,115 @@ function switchAnalysisTab(tab) {
   document.getElementById('apply-analysis').disabled = !hasAIReply;
 
   updatePreview('analysis');
+}
+
+/* ============================================================
+   辅助：策略条目数组 → 可读文本（聊天气泡 & applyChapter 兼容）
+============================================================ */
+function _stratItemsToText(items) {
+  return (items || []).map(it =>
+    it.problem ? `${it.problem} → ${it.name}：${it.desc}` : `${it.name}：${it.desc}`
+  ).join('\n');
+}
+
+/* ============================================================
+   设计策略——切换三个策略方向
+   点击卡片：高亮选中 → 更新聊天区 → 更新预览
+============================================================ */
+function selectStrategyOption(idx) {
+  const opts = S.strategyOptions;
+  if (!opts || idx >= opts.length) return;
+  S.selectedStrategyIdx = idx;
+
+  // 更新卡片高亮
+  [0, 1, 2].forEach(i => document.getElementById(`sopt-${i}`)?.classList.toggle('active', i === idx));
+
+  const opt = opts[idx];
+  const items = opt.items || [];
+
+  // 更新聊天区
+  const chatMsg = (opt.direction ? `**${opt.direction}**\n\n` : '') + _stratItemsToText(items);
+  S.chats.strategy = [{ role:'assistant', content: chatMsg }];
+  S.chatHTML.strategy = _buildChatMsgHTML(chatMsg);
+  const chatEl = document.getElementById('chat-strategy');
+  if (chatEl) chatEl.innerHTML = S.chatHTML.strategy;
+
+  // 更新预览
+  S.applied.strategy = { title:'设计策略', items };
+  document.getElementById('apply-strategy')?.removeAttribute('disabled');
+  renderPreviewPages();
+}
+
+/* ============================================================
+   换一批策略：根据输入框要求重新生成三个策略方向（更新 tabs）
+============================================================ */
+async function regenStrategyOptions() {
+  const input   = document.getElementById('input-strategy');
+  const userReq = input.value.trim();
+  if (!userReq) { toast('请先在输入框描述新的策略方向要求'); return; }
+  if (!S.apiKey) { toast('请先设置 API Key'); return; }
+
+  const btn = document.getElementById('btn-regen-strategy');
+  btn.disabled = true; btn.textContent = '生成中…';
+
+  const bar = document.getElementById('strategy-opts-bar');
+  if (bar) bar.style.display = 'block';
+
+  addMsg('strategy', 'user', userReq);
+  input.value = ''; input.style.height = '';
+
+  const chatEl = document.getElementById('chat-strategy');
+  const thinking = document.createElement('div');
+  thinking.className = 'msg ai';
+  thinking.innerHTML = '<div class="msg-bubble" style="color:var(--text-3)">正在生成三个策略方向…</div>';
+  chatEl.appendChild(thinking); chatEl.scrollTop = chatEl.scrollHeight;
+
+  const projName = document.getElementById('proj-name')?.value?.trim()     || '';
+  const projLoc  = document.getElementById('proj-location')?.value?.trim() || '';
+  const rawFull  = document.getElementById('raw-text')?.value?.trim()      || '';
+  const rawSnip  = rawFull.length > 800 ? rawFull.slice(0, 800) + '…' : rawFull;
+
+  const prompt = `你是景观设计文案师。
+项目：${projName}｜地点：${projLoc}
+${rawSnip ? `资料节选：${rawSnip}\n` : ''}设计师要求：${userReq}
+
+生成3个完全不同策略方向，只返回JSON数组，不要其他文字：
+[
+  {"direction":"方向名①（2-4字）","items":[{"problem":"场地问题（4-8字）","name":"策略名（2-5字）","desc":"解法（15-25字）"}]},
+  {"direction":"方向名②","items":[{"problem":"场地问题","name":"策略名","desc":"解法"}]},
+  {"direction":"方向名③","items":[{"problem":"场地问题","name":"策略名","desc":"解法"}]}
+]
+每个方向3-4条策略，三个方向取向须完全不同。`;
+
+  try {
+    const raw  = await callAI([{ role:'user', content: prompt }], true);
+    thinking.remove();
+
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (!m) throw new Error('返回格式有误，请重试');
+    const opts = JSON.parse(m[0]);
+    if (!Array.isArray(opts) || opts.length === 0) throw new Error('未生成有效方案');
+
+    S.strategyOptions = opts;
+    S.selectedStrategyIdx = 0;
+
+    // 更新 tab 卡片名称
+    opts.forEach((opt, i) => {
+      const el = document.getElementById(`sopt-name-${i}`);
+      if (el) el.textContent = opt.direction || `方向${i+1}`;
+    });
+    [0,1,2].forEach(i => document.getElementById(`sopt-${i}`)?.classList.toggle('active', i===0));
+
+    selectStrategyOption(0);
+    toast('已生成三个策略方向，点击选择');
+
+  } catch(err) {
+    thinking.remove();
+    addMsg('strategy', 'ai', `⚠️ 生成失败：${err.message}`);
+    toast('生成失败：' + err.message);
+  }
+
+  btn.disabled = false; btn.textContent = '换一批策略';
 }
 
 /* ============================================================
@@ -1417,11 +1548,12 @@ function applyChapter(chapter) {
 
   // 写入 S.applied（按章节类型处理）
   if (key === 'strategy') {
-    // 策略：将编号列表解析为 "策略名：描述" 每行
-    // 策略：从对话文本中解析 "问题→策略名：解法" 或 "策略名：解法" 格式，存为 items 数组
-    const lines = content.split('\n').map(l => l.trim()).filter(l => l);
+    // 策略：从对话文本中解析 "问题→策略名：解法" 格式，存为 items 数组
+    // 过滤掉方向标题行（**粗体** 开头）和空行
+    const lines = content.split('\n').map(l => l.trim())
+      .filter(l => l.length > 2 && !l.startsWith('**'));
     const numbered = lines.filter(l => /^\d/.test(l));
-    const parseLines = numbered.length >= 2 ? numbered : lines.filter(l => l.length > 2);
+    const parseLines = numbered.length >= 2 ? numbered : lines;
     const stratItems = parseLines.map(l => {
       const raw = l.replace(/^\d+[\.\、]\s*/, '');
       const arrowI = raw.indexOf('→') > -1 ? raw.indexOf('→') : (raw.indexOf('->') > -1 ? raw.indexOf('->') : -1);
@@ -1430,7 +1562,7 @@ function applyChapter(chapter) {
       const colonI = rest.indexOf('：') > -1 ? rest.indexOf('：') : (rest.indexOf(':') > -1 ? rest.indexOf(':') : -1);
       if (colonI > -1) return { problem, name: rest.slice(0, colonI).trim(), desc: rest.slice(colonI+1).trim() };
       return { problem, name: rest, desc: '' };
-    });
+    }).filter(it => it.name.length > 0);
     S.applied.strategy = { title: '设计策略', items: stratItems.length ? stratItems : [] };
 
   } else if (key === 'concept') {
@@ -1983,11 +2115,11 @@ ${rawText}
 
 严格返回以下 JSON，不要任何额外文字：
 {
-  "strategy": {
-    "items": [
-      { "problem": "场地核心问题（4-8字，客观描述现状矛盾，如"路线平直单调"）", "name": "策略名（2-5字，对应解法的核心意象，如"曲径通幽"）", "desc": "解法说明（15-30字，说清楚怎么做）" }
-    ]
-  },
+  "strategy": [
+    { "direction": "策略方向名①（2-4字，体现核心取向，如"生态优先"）", "items": [ { "problem": "场地问题（4-8字）", "name": "策略名（2-5字意象）", "desc": "解法（15-25字）" } ] },
+    { "direction": "策略方向名②（与①不同取向）", "items": [ { "problem": "场地问题", "name": "策略名", "desc": "解法" } ] },
+    { "direction": "策略方向名③（第三取向）",   "items": [ { "problem": "场地问题", "name": "策略名", "desc": "解法" } ] }
+  ],
   "concept": [
     {
       "theme_name": "四字主题①（须与项目地域文化/场地/建筑气质高度契合，不可用通用词）",
@@ -1999,7 +2131,7 @@ ${rawText}
     { "theme_name":"四字主题③（第三种文化视角）", "content":"100-140字", "keywords":["词1","词2","词3"], "zones":[{"name":"景区名","note":"关联"}] }
   ]
 }
-注意：strategy共3-4条；concept每个方案zones共5-6个景区；三个方案主题须完全不同、各有鲜明文化辨识度。`;
+注意：strategy三个方向各3-4条策略，方向名须完全不同；concept每个方案zones共5-6个景区，三个方案主题须完全不同。`;
 
   try {
     // 两路并行，速度约为串行的一半
@@ -2037,13 +2169,28 @@ ${rawText}
     });
 
     // ③ 写入创意章节（来自 B）
-    if (dB.strategy) {
-      // 新格式：存储 items 数组 {problem, name, desc}，渲染时直接使用
-      S.applied.strategy = { title:'设计策略', items: dB.strategy.items || [] };
-      // 聊天记录：用 "问题 → 策略名：解法" 格式显示
-      const stratTxt = (dB.strategy.items||[]).map(it =>
-        it.problem ? `${it.problem} → ${it.name}：${it.desc}` : `${it.name}：${it.desc}`
-      ).join('\n');
+    // 策略：现在是三个方向的数组 [{direction, items}, ...]
+    const stratArr = Array.isArray(dB.strategy) ? dB.strategy
+      : (dB.strategy?.items ? [dB.strategy] : []); // 向后兼容旧格式
+    if (stratArr.length > 0) {
+      S.strategyOptions = stratArr;
+      S.selectedStrategyIdx = 0;
+
+      // 更新策略方向卡片标题
+      const stratBar = document.getElementById('strategy-opts-bar');
+      if (stratBar) {
+        stratBar.style.display = 'block';
+        stratArr.forEach((opt, i) => {
+          const el = document.getElementById(`sopt-name-${i}`);
+          if (el) el.textContent = opt.direction || `方向${i+1}`;
+        });
+        [0,1,2].forEach(i => document.getElementById(`sopt-${i}`)?.classList.toggle('active', i===0));
+      }
+
+      // 将第一个方向应用到预览
+      const firstStrat = stratArr[0];
+      S.applied.strategy = { title:'设计策略', items: firstStrat.items || [] };
+      const stratTxt = _stratItemsToText(firstStrat.items || []);
       S.chats.strategy = [{ role:'assistant', content: stratTxt }];
       S.chatHTML.strategy = _buildChatMsgHTML(stratTxt);
     }
