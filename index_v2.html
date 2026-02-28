@@ -769,6 +769,11 @@ function switchScreen(name) {
 
   if (name === 'strategy' || name === 'concept') {
     syncAppliedUI(name);
+    // 恢复聊天 DOM（一键生成后切换到此标签时能看到内容）
+    const chatEl = document.getElementById(`chat-${name}`);
+    if (chatEl && S.chatHTML[name]) {
+      chatEl.innerHTML = S.chatHTML[name];
+    }
   }
 
   updatePreview(name);
@@ -1818,6 +1823,7 @@ ${rawText}
       const items = (dB.strategy.items || []).map(it => `${it.name}：${it.desc}`).join('\n');
       S.applied.strategy = { title:'设计策略', content: items };
       S.chats.strategy = [{ role:'assistant', content: items }];
+      S.chatHTML.strategy = _buildChatMsgHTML(items); // 缓存 DOM，供切换时恢复
     }
     if (dB.concept) {
       S.applied.concept = { title:'设计构思', ...dB.concept };
