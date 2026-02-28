@@ -1,0 +1,2946 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>景观设计文本排版工具</title>
+  <!-- PDF.js：用于从PDF文件中提取文字内容 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <style>
+    /* ================================================
+       全局变量 & Reset
+    ================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f5f5f7;
+      --surface: #ffffff;
+      --surface-2: #f2f2f2;
+      --border: #d2d2d7;
+      --text-primary: #1d1d1f;
+      --text-secondary: #6e6e73;
+      --accent: #0071e3;
+      --accent-hover: #0077ed;
+      --radius: 10px;
+      --panel-w: 360px;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ================================================
+       顶部导航栏
+    ================================================ */
+    .navbar {
+      height: 52px;
+      background: rgba(255,255,255,0.9);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      flex-shrink: 0;
+      z-index: 100;
+    }
+    .navbar-title { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; }
+    .navbar-sub { font-size: 12px; color: var(--text-secondary); margin-left: 10px; }
+    .navbar-left { display: flex; align-items: center; }
+    .navbar-right { display: flex; gap: 8px; }
+
+    /* ================================================
+       通用按钮
+    ================================================ */
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 7px 14px; border-radius: 8px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; border: none; font-family: inherit;
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-secondary { background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); }
+    .btn-secondary:hover:not(:disabled) { background: var(--surface-2); }
+    .btn-ghost { background: transparent; color: var(--accent); }
+    .btn-ghost:hover:not(:disabled) { background: rgba(0,113,227,0.08); }
+    .btn-block { width: 100%; justify-content: center; }
+
+    /* ================================================
+       主体布局
+    ================================================ */
+    .app-body { display: flex; flex: 1; overflow: hidden; }
+
+    /* ================================================
+       左侧面板
+    ================================================ */
+    .left-panel {
+      width: var(--panel-w);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    /* Tab栏 */
+    .tab-bar {
+      display: flex; padding: 12px 16px 0; gap: 4px;
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .tab {
+      padding: 8px 14px; border-radius: 8px 8px 0 0;
+      font-size: 12px; font-weight: 500; cursor: pointer;
+      color: var(--text-secondary);
+      border: 1px solid transparent; border-bottom: none;
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .tab.active {
+      color: var(--accent); background: var(--bg);
+      border-color: var(--border); border-bottom-color: var(--bg);
+      position: relative; top: 1px;
+    }
+
+    /* ================================================
+       第一章：新三段式布局
+       上：输入区（固定）
+       中：对话区（滚动）
+       下：输入框（固定）
+    ================================================ */
+    #panel-ch1 {
+      display: flex; flex-direction: column; flex: 1; overflow: hidden;
+    }
+
+    /* 上段：输入区 */
+    .ch1-input-section {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    /* API状态栏 */
+    .api-bar {
+      background: var(--bg); border-radius: var(--radius);
+      padding: 8px 12px;
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .api-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff3b30; flex-shrink: 0; }
+    .status-dot.on { background: #34c759; }
+
+    /* 输入方式选择器 */
+    .input-modes {
+      display: flex; background: var(--surface-2);
+      border-radius: 8px; padding: 3px; margin-bottom: 12px; gap: 2px;
+    }
+    .im-btn {
+      flex: 1; padding: 5px 4px; border-radius: 6px;
+      font-size: 11px; font-weight: 500; cursor: pointer;
+      border: none; background: transparent; color: var(--text-secondary);
+      font-family: inherit; transition: all 0.15s; text-align: center;
+    }
+    .im-btn.active {
+      background: white; color: var(--text-primary);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    }
+
+    /* 文本粘贴 */
+    .input, .textarea, .select {
+      width: 100%; padding: 8px 11px; border-radius: var(--radius);
+      border: 1px solid var(--border); font-size: 13px; font-family: inherit;
+      background: var(--bg); color: var(--text-primary);
+      outline: none; transition: border-color 0.15s, background 0.15s;
+    }
+    .input:focus, .textarea:focus { border-color: var(--accent); background: white; }
+    .textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
+
+    /* 上传区域 */
+    .upload-zone {
+      border: 1.5px dashed var(--border); border-radius: var(--radius);
+      padding: 18px 12px; text-align: center; cursor: pointer;
+      transition: all 0.15s; background: var(--bg);
+    }
+    .upload-zone:hover { border-color: var(--accent); background: rgba(0,113,227,0.04); }
+    .upload-zone-icon { margin-bottom: 8px; opacity: 0.4; }
+    .upload-zone-title { font-size: 13px; font-weight: 500; margin-bottom: 3px; }
+    .upload-zone-hint { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+
+    /* 图片预览 */
+    .img-preview-wrap { position: relative; border-radius: var(--radius); overflow: hidden; }
+    .img-preview-wrap img { width: 100%; display: block; border-radius: var(--radius); }
+    .img-preview-clear {
+      position: absolute; top: 6px; right: 6px;
+      background: rgba(0,0,0,0.55); color: white;
+      border: none; border-radius: 20px;
+      padding: 3px 9px; font-size: 11px; cursor: pointer; font-family: inherit;
+    }
+
+    /* 文件已加载提示 */
+    .file-loaded {
+      background: rgba(52,199,89,0.1); border: 1px solid rgba(52,199,89,0.3);
+      border-radius: var(--radius); padding: 10px 12px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .file-loaded-name { font-size: 12px; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-loaded-clear { font-size: 11px; color: var(--text-secondary); cursor: pointer; text-decoration: underline; }
+
+    /* 分析按钮 */
+    .analyze-btn {
+      width: 100%; display: flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 9px; border-radius: 9px;
+      background: var(--accent); color: white;
+      border: none; font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: all 0.15s;
+      margin-top: 10px;
+    }
+    .analyze-btn:hover:not(:disabled) { background: var(--accent-hover); }
+    .analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ================================================
+       中段：对话区
+    ================================================ */
+    .chat-area {
+      flex: 1; overflow-y: auto; padding: 14px 14px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .chat-area::-webkit-scrollbar { width: 4px; }
+    .chat-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* 空状态提示 */
+    .chat-empty {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; height: 100%; gap: 10px; color: var(--text-secondary);
+      text-align: center; padding: 20px;
+    }
+    .chat-empty svg { opacity: 0.3; }
+    .chat-empty p { font-size: 12px; line-height: 1.7; }
+
+    /* 消息条 */
+    .chat-msg { display: flex; gap: 7px; align-items: flex-start; }
+    .chat-msg.user-msg { flex-direction: row-reverse; }
+
+    /* 头像 */
+    .msg-avatar {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; flex-shrink: 0; color: white;
+    }
+    .msg-avatar.ai { background: var(--accent); }
+    .msg-avatar.user { background: #34c759; }
+
+    /* 气泡容器 */
+    .msg-body { display: flex; flex-direction: column; gap: 6px; max-width: calc(100% - 36px); }
+
+    /* 纯文字气泡 */
+    .msg-bubble {
+      padding: 9px 12px; border-radius: 10px;
+      font-size: 12px; line-height: 1.7;
+    }
+    .ai-bubble { background: var(--bg); color: var(--text-primary); border-radius: 2px 10px 10px 10px; }
+    .user-bubble { background: var(--accent); color: white; border-radius: 10px 2px 10px 10px; }
+
+    /* 分析结果卡片 */
+    .sec-card { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; margin-top: 4px; }
+    .sec-card-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 11px; background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .sec-card-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; }
+    .sec-card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .sec-card-body { padding: 10px 11px; }
+    .sec-card-title { font-size: 12px; font-weight: 600; margin-bottom: 5px; }
+    .sec-card-text { font-size: 11.5px; color: #3a3a3c; line-height: 1.7; margin-bottom: 8px; }
+    .sec-card-kws { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+    .kw-tag {
+      font-size: 10px; padding: 2px 8px;
+      background: rgba(0,113,227,0.1); color: var(--accent);
+      border-radius: 20px; font-weight: 500;
+    }
+    .apply-btn-sm {
+      font-size: 11px; padding: 4px 11px; border-radius: 6px;
+      border: 1px solid var(--accent); color: var(--accent);
+      background: transparent; cursor: pointer; font-family: inherit; transition: all 0.15s;
+    }
+    .apply-btn-sm:hover { background: rgba(0,113,227,0.08); }
+    .apply-btn-sm.applied { background: #34c759; border-color: #34c759; color: white; }
+
+    /* 跟进回复的应用按钮行 */
+    .apply-row {
+      display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+      padding: 6px 12px 9px;
+    }
+    .apply-row-label { font-size: 10px; color: var(--text-secondary); margin-right: 2px; }
+    .apply-to-btn {
+      font-size: 10px; padding: 3px 9px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text-secondary); cursor: pointer; font-family: inherit; transition: all 0.15s;
+    }
+    .apply-to-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* 加载中气泡 */
+    .typing-bubble {
+      display: flex; align-items: center; gap: 5px;
+      padding: 10px 14px; background: var(--bg);
+      border-radius: 2px 10px 10px 10px;
+    }
+    .typing-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--text-secondary);
+      animation: typing 1.2s ease-in-out infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typing { 0%,60%,100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+
+    /* ================================================
+       下段：聊天输入框
+    ================================================ */
+    .chat-input-row {
+      border-top: 1px solid var(--border);
+      padding: 10px 12px;
+      display: flex; gap: 7px; align-items: flex-end;
+      flex-shrink: 0; background: white;
+    }
+    .chat-textarea {
+      flex: 1; border: 1px solid var(--border); border-radius: 8px;
+      padding: 7px 10px; font-size: 12px; font-family: inherit;
+      resize: none; outline: none;
+      max-height: 72px; min-height: 34px;
+      line-height: 1.5; overflow-y: auto;
+      transition: border-color 0.15s;
+    }
+    .chat-textarea:focus { border-color: var(--accent); }
+    .send-btn {
+      background: var(--accent); color: white; border: none;
+      border-radius: 8px; width: 34px; height: 34px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; flex-shrink: 0; transition: background 0.15s;
+    }
+    .send-btn:hover { background: var(--accent-hover); }
+    .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* 输入提示 */
+    .chat-hint-text {
+      font-size: 11px; color: var(--text-secondary);
+      text-align: center; padding: 5px 0; flex-shrink: 0;
+    }
+
+    /* ================================================
+       第二章：面板（原有逻辑保留）
+    ================================================ */
+    .panel-scroll {
+      flex: 1; overflow-y: auto; padding: 16px;
+    }
+    .panel-scroll::-webkit-scrollbar { width: 4px; }
+    .panel-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .field-group { margin-bottom: 14px; }
+    .field-label { display: block; font-size: 12px; font-weight: 500; color: var(--text-primary); margin-bottom: 5px; }
+    .field-sub { font-size: 11px; color: var(--text-secondary); font-weight: 400; margin-left: 4px; }
+    .section-header { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 10px; margin-top: 4px; }
+    .divider { height: 1px; background: var(--border); margin: 14px 0; }
+
+    .steps { display: flex; align-items: center; margin-bottom: 18px; }
+    .step-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-secondary); }
+    .step-num { width: 20px; height: 20px; border-radius: 50%; background: var(--border); color: white; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
+    .step-item.active .step-num { background: var(--accent); }
+    .step-item.done .step-num { background: #34c759; }
+    .step-line { flex: 1; height: 1px; background: var(--border); margin: 0 6px; }
+
+    .version-card { border: 1.5px solid var(--border); border-radius: var(--radius); padding: 13px; cursor: pointer; transition: all 0.15s; margin-bottom: 8px; }
+    .version-card:hover { border-color: var(--accent); }
+    .version-card.selected { border-color: var(--accent); background: rgba(0,113,227,0.04); }
+    .version-tag { font-size: 11px; font-weight: 600; color: var(--accent); background: rgba(0,113,227,0.1); padding: 2px 8px; border-radius: 20px; display: inline-block; margin-bottom: 7px; }
+    .version-name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .version-tagline { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+
+    /* ================================================
+       右侧预览区
+    ================================================ */
+    .preview-area {
+      flex: 1; background: #e0e0e5; overflow: auto;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 24px 40px; gap: 20px;
+    }
+    .preview-area::-webkit-scrollbar { width: 6px; height: 6px; }
+    .preview-area::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 3px; }
+
+    .preview-toolbar {
+      background: rgba(255,255,255,0.95); backdrop-filter: blur(10px);
+      border-radius: var(--radius); padding: 8px 16px;
+      display: flex; align-items: center; gap: 12px;
+      width: 100%; max-width: 1100px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      position: sticky; top: 0; z-index: 10; flex-shrink: 0;
+    }
+    .zoom-btns { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; }
+
+    .pages-wrap { display: flex; flex-direction: column; align-items: center; gap: 20px; width: 100%; }
+    .page-wrap { position: relative; flex-shrink: 0; }
+    .page-num-label { position: absolute; left: -28px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #9a9a9e; writing-mode: vertical-rl; }
+    .a3-page { background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.18); position: relative; overflow: hidden; flex-shrink: 0; }
+    .img-slot { background: #f0f0f5; border: 1.5px dashed #c7c7cc; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; overflow: hidden; flex-shrink: 0; }
+    .img-slot:hover { background: #e8e8f0; border-color: var(--accent); }
+    .img-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    /* ================================================
+       设置模态框
+    ================================================ */
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000; align-items: center; justify-content: center; }
+    .overlay.show { display: flex; }
+    .modal { background: white; border-radius: 16px; padding: 28px; width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,0.25); }
+    .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 20px; }
+    .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    /* Toast */
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(60px); background: #1d1d1f; color: white; padding: 10px 18px; border-radius: 10px; font-size: 13px; z-index: 2000; transition: transform 0.25s ease; white-space: nowrap; pointer-events: none; }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* 旋转动画 */
+    .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ================================================
+       拖放覆盖层
+    ================================================ */
+    .drop-overlay {
+      position: fixed; inset: 0; z-index: 900;
+      background: rgba(0,113,227,0.08);
+      border: 3px dashed var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .drop-overlay.show { opacity: 1; }
+    .drop-overlay-card {
+      background: white; border-radius: 20px;
+      padding: 28px 48px; text-align: center;
+      box-shadow: 0 16px 48px rgba(0,113,227,0.2);
+      border: 2px solid var(--accent);
+    }
+    .drop-overlay-icon { margin-bottom: 12px; }
+    .drop-overlay-title { font-size: 18px; font-weight: 700; color: var(--accent); margin-bottom: 6px; }
+    .drop-overlay-sub { font-size: 13px; color: var(--text-secondary); }
+
+    /* 对话区拖放高亮 */
+    .chat-area.drag-over {
+      background: rgba(0,113,227,0.05);
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- 拖放覆盖层（全屏） -->
+<div class="drop-overlay" id="drop-overlay">
+  <div class="drop-overlay-card">
+    <div class="drop-overlay-icon">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#0071e3" stroke-width="1.5">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+    </div>
+    <div class="drop-overlay-title">松开鼠标即可导入</div>
+    <div class="drop-overlay-sub" id="drop-overlay-sub">支持 PDF、图片截图、.txt 文件</div>
+  </div>
+</div>
+
+<!-- ====== 顶部导航 ====== -->
+<nav class="navbar">
+  <div class="navbar-left">
+    <span class="navbar-title">景观设计文本排版工具</span>
+    <span class="navbar-sub">A3横向 · 420×297mm · 页边距20mm</span>
+  </div>
+  <div class="navbar-right">
+    <button class="btn btn-secondary" onclick="testMinimalIDML()" title="导出最简单的测试IDML，用来判断问题在哪">
+      🧪 最小测试
+    </button>
+    <button class="btn btn-secondary" onclick="openSettings()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      设置
+    </button>
+    <button class="btn btn-primary" onclick="exportIDML()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      导出 IDML → InDesign
+    </button>
+  </div>
+</nav>
+
+<!-- ====== 主体 ====== -->
+<div class="app-body">
+
+  <!-- ===== 左侧面板 ===== -->
+  <div class="left-panel">
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('ch1', this)">第一章：前期分析</div>
+      <div class="tab" onclick="switchTab('ch2', this)">第二章：设计构思</div>
+    </div>
+
+    <!-- ===== 第一章：三段式布局 ===== -->
+    <div id="panel-ch1" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+
+      <!-- 上段：输入区（固定） -->
+      <div class="ch1-input-section">
+
+        <!-- API状态 -->
+        <div class="api-bar">
+          <div class="api-status">
+            <div class="status-dot" id="dot1"></div>
+            <span id="dot1-text">未配置 API Key</span>
+          </div>
+          <button class="btn btn-ghost" style="padding:3px 8px;font-size:12px;" onclick="openSettings()">去配置</button>
+        </div>
+
+        <!-- 输入方式选择 -->
+        <div class="input-modes">
+          <button class="im-btn active" onclick="setInputMode(this,'text')">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:3px;vertical-align:-1px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            粘贴文字
+          </button>
+          <button class="im-btn" onclick="setInputMode(this,'file')">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:3px;vertical-align:-1px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            上传文件
+          </button>
+          <button class="im-btn" onclick="setInputMode(this,'image')">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:3px;vertical-align:-1px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            截图识别
+          </button>
+        </div>
+
+        <!-- 模式A：粘贴文字 -->
+        <div id="mode-text">
+          <textarea class="textarea" id="raw-text" rows="5"
+            placeholder="将建筑说明书或设计任务书的文字内容粘贴到这里，AI 将自动分析并同时填写区位、基地、建筑分析三个页面…"></textarea>
+        </div>
+
+        <!-- 模式B：上传文件 -->
+        <div id="mode-file" style="display:none;">
+          <div class="upload-zone" id="file-zone" onclick="document.getElementById('file-input').click()">
+            <div class="upload-zone-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#aeaeb2" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div class="upload-zone-title">点击上传文本文件</div>
+            <div class="upload-zone-hint">支持 .txt 格式<br>
+              <span style="color:#ff9500;font-weight:500;">⚠ PDF / Word 请在原软件中全选复制，切换到「粘贴文字」模式粘贴</span>
+            </div>
+          </div>
+          <!-- PDF错误提示 -->
+          <div id="file-pdf-error" style="display:none;background:rgba(255,59,48,0.08);border:1px solid rgba(255,59,48,0.25);border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.6;color:#c0392b;margin-top:8px;">
+            <strong>检测到 PDF 文件</strong><br>
+            PDF 是图片+代码的混合格式，不能直接上传。<br>
+            请这样操作：打开 PDF → 全选文字（Ctrl+A）→ 复制（Ctrl+C）→ 切换到「粘贴文字」模式 → 粘贴
+          </div>
+          <div id="file-loaded" class="file-loaded" style="display:none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34c759" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            <span class="file-loaded-name" id="file-name"></span>
+            <span class="file-loaded-clear" onclick="clearFile()">重新上传</span>
+          </div>
+          <input type="file" id="file-input" accept=".txt,.md" style="display:none;" onchange="handleFileUpload(this)">
+        </div>
+
+        <!-- 模式C：截图识别 -->
+        <div id="mode-image" style="display:none;">
+          <div class="upload-zone" id="img-zone" onclick="document.getElementById('img-input').click()">
+            <div class="upload-zone-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#aeaeb2" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            </div>
+            <div class="upload-zone-title">点击上传截图</div>
+            <div class="upload-zone-hint">AI 将自动识别图片中的文字内容</div>
+          </div>
+          <div id="img-preview-wrap" class="img-preview-wrap" style="display:none;">
+            <img id="img-preview-src" src="" alt="">
+            <button class="img-preview-clear" onclick="clearImage()">重新上传</button>
+          </div>
+          <input type="file" id="img-input" accept="image/*" style="display:none;" onchange="handleImageUpload(this)">
+        </div>
+
+        <!-- 一键分析按钮 -->
+        <button class="analyze-btn" id="analyze-btn" onclick="analyzeAll()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          AI 一键分析前期分析三页
+        </button>
+      </div><!-- /ch1-input-section -->
+
+      <!-- 中段：对话区（可滚动） -->
+      <div class="chat-area" id="chat-area">
+        <div class="chat-empty" id="chat-empty">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#aeaeb2" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <p>提供原始文本后，点击上方按钮<br>AI 将同时分析三个分析页面的内容<br>分析完成后可在这里继续对话修改</p>
+          <p style="margin-top:10px;font-size:11px;color:#c7c7cc;">
+            💡 也可以直接将 PDF / 截图拖入此区域
+          </p>
+        </div>
+        <!-- 消息列表（动态插入） -->
+      </div>
+
+      <!-- 下段：输入框（固定） -->
+      <div class="chat-input-row">
+        <textarea class="chat-textarea" id="chat-input"
+          placeholder="继续向 AI 提问，如"区位分析能更详细一些"…"
+          onkeydown="handleChatKey(event)" rows="1"></textarea>
+        <button class="send-btn" id="send-btn" onclick="sendChat()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+
+    </div><!-- /panel-ch1 -->
+
+    <!-- ===== 第二章：设计构思 ===== -->
+    <div class="panel-scroll" id="panel-ch2" style="display:none;flex:1;">
+
+      <div class="api-bar">
+        <div class="api-status">
+          <div class="status-dot" id="dot2"></div>
+          <span id="dot2-text">未配置 API Key</span>
+        </div>
+        <button class="btn btn-ghost" style="padding:3px 8px;font-size:12px;" onclick="openSettings()">去配置</button>
+      </div>
+
+      <div class="steps">
+        <div class="step-item active" id="s1"><div class="step-num">1</div><span>项目信息</span></div>
+        <div class="step-line"></div>
+        <div class="step-item" id="s2"><div class="step-num">2</div><span>选版本</span></div>
+        <div class="step-line"></div>
+        <div class="step-item" id="s3"><div class="step-num">3</div><span>确认</span></div>
+      </div>
+
+      <!-- 步骤1 -->
+      <div id="ch2-s1">
+        <div class="field-group">
+          <label class="field-label">项目名称</label>
+          <input class="input" id="proj-name" placeholder="如：碧湖花园景观设计方案">
+        </div>
+        <div class="field-group">
+          <label class="field-label">项目地点</label>
+          <input class="input" id="proj-loc" placeholder="如：浙江省杭州市西湖区">
+        </div>
+        <div class="field-group">
+          <label class="field-label">项目类型</label>
+          <select class="input" id="proj-type">
+            <option value="居住区景观">居住区景观</option>
+            <option value="公园绿地">公园绿地</option>
+            <option value="商业广场">商业广场</option>
+            <option value="办公园区">办公园区</option>
+            <option value="历史文化街区">历史文化街区</option>
+            <option value="滨水景观">滨水景观</option>
+            <option value="校园景观">校园景观</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">风格关键词<span class="field-sub">可选</span></label>
+          <input class="input" id="proj-kw" placeholder="如：江南水乡，现代简约，生态自然">
+        </div>
+        <div class="field-group">
+          <label class="field-label">补充说明<span class="field-sub">可选</span></label>
+          <textarea class="textarea" id="proj-extra" rows="3" placeholder="业主需求、场地特点等…"></textarea>
+        </div>
+        <button class="btn btn-primary btn-block" id="gen-btn" onclick="generateConcepts()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          生成三个设计构思版本
+        </button>
+      </div>
+
+      <!-- 步骤2 -->
+      <div id="ch2-s2" style="display:none;">
+        <div class="section-header" style="margin-bottom:12px;">选择一个方向</div>
+        <div id="version-list"></div>
+        <div class="divider"></div>
+        <button class="btn btn-primary btn-block" onclick="confirmVersion()" style="margin-bottom:8px;">确认并进入编辑</button>
+        <button class="btn btn-secondary btn-block" onclick="backToStep1()">重新生成</button>
+      </div>
+
+      <!-- 步骤3 -->
+      <div id="ch2-s3" style="display:none;">
+        <div class="field-group">
+          <label class="field-label">灵感来源</label>
+          <textarea class="textarea" id="inspo" rows="4" placeholder="灵感来源内容…"></textarea>
+        </div>
+        <div class="field-group">
+          <label class="field-label">设计理念</label>
+          <textarea class="textarea" id="concept" rows="5" placeholder="设计理念内容…"></textarea>
+        </div>
+        <div class="field-group">
+          <label class="field-label">主题落位分区<span class="field-sub">每行：分区名：主题描述</span></label>
+          <textarea class="textarea" id="zones" rows="5" placeholder="入口广场：活力迎宾&#10;中心草坪：生态休憩&#10;滨水栈道：亲水体验"></textarea>
+        </div>
+        <button class="btn btn-primary btn-block" onclick="applyToPage('ch2')" style="margin-bottom:8px;">应用到预览页面</button>
+        <button class="btn btn-ghost btn-block" onclick="backToStep2()">返回重新选择</button>
+      </div>
+
+    </div><!-- /panel-ch2 -->
+  </div><!-- /left-panel -->
+
+  <!-- ===== 右侧预览区 ===== -->
+  <div class="preview-area">
+    <div class="preview-toolbar">
+      <span style="font-size:13px;font-weight:600;">页面预览</span>
+      <span style="font-size:11px;color:var(--text-secondary);">共 <span id="pg-count">6</span> 页 · 点击图片区域可上传本地图片</span>
+      <div class="zoom-btns">
+        <button class="btn btn-secondary" style="padding:4px 10px;" onclick="doZoom(-1)">−</button>
+        <span id="zoom-txt" style="min-width:38px;text-align:center;font-size:12px;">60%</span>
+        <button class="btn btn-secondary" style="padding:4px 10px;" onclick="doZoom(1)">+</button>
+      </div>
+    </div>
+    <div class="pages-wrap" id="pages-wrap"></div>
+  </div>
+
+</div><!-- /app-body -->
+
+<!-- ====== 设置模态框 ====== -->
+<div class="overlay" id="modal-settings">
+  <div class="modal">
+    <div class="modal-title">设置</div>
+    <div class="field-group">
+      <label class="field-label">AI 服务商</label>
+      <select class="input" id="s-provider" onchange="updateModelList()">
+        <option value="deepseek">DeepSeek</option>
+        <option value="doubao">豆包（字节跳动）</option>
+        <option value="openai">OpenAI</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">API Key</label>
+      <input class="input" id="s-apikey" type="password" placeholder="sk-…">
+    </div>
+    <div class="field-group">
+      <label class="field-label">模型</label>
+      <select class="input" id="s-model">
+        <option value="deepseek-chat">deepseek-chat（推荐）</option>
+        <option value="deepseek-reasoner">deepseek-reasoner（更强，更慢）</option>
+      </select>
+    </div>
+    <div class="field-group" id="s-doubao-row" style="display:none;">
+      <label class="field-label">豆包 Endpoint ID<span class="field-sub">豆包专用</span></label>
+      <input class="input" id="s-endpoint" placeholder="ep-xxxxxxxxxx">
+    </div>
+    <div class="divider"></div>
+    <div class="section-header">InDesign页面规格</div>
+    <div class="settings-grid">
+      <div class="field-group">
+        <label class="field-label">页宽 (mm)</label>
+        <input class="input" id="s-pw" value="420" type="number">
+      </div>
+      <div class="field-group">
+        <label class="field-label">页高 (mm)</label>
+        <input class="input" id="s-ph" value="297" type="number">
+      </div>
+      <div class="field-group">
+        <label class="field-label">页边距 (mm)</label>
+        <input class="input" id="s-pm" value="20" type="number">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================================================
+   全局状态
+================================================ */
+const S = {
+  zoom: 0.6,
+  pageW: 420, pageH: 297, pageMargin: 20,
+  apiKey: '', provider: 'deepseek', model: 'deepseek-chat', endpoint: '',
+
+  inputMode: 'text',      // 当前输入模式
+  fileText: null,         // 文件模式：读取到的文字
+  imageData: null,        // 截图模式：{ base64url, mimeType }
+
+  chatHistory: [],        // 对话历史 [{role, content}]
+  isChatting: false,      // 正在等待AI回复
+
+  // 各页内容
+  pages: {
+    location:  { title: '区位分析',  content: '', keywords: [] },
+    site:      { title: '基地分析',  content: '', keywords: [] },
+    building:  { title: '建筑分析',  content: '', keywords: [] },
+    inspo:     { content: '' },
+    concept:   { content: '' },
+    zones:     { content: '' },
+  },
+
+  // 第二章
+  genVersions: [], selVersion: null,
+};
+
+/* ================================================
+   初始化
+================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+  loadSettings();
+  render();
+  initDragDrop();
+});
+
+/* ================================================
+   拖放文件支持
+   支持：PDF（提取文字）/ 图片（截图识别）/ TXT
+================================================ */
+function initDragDrop() {
+  // 配置 PDF.js worker（CDN路径需与主库版本一致）
+  if (window['pdfjs-dist/build/pdf']) {
+    window['pdfjs-dist/build/pdf'].GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  let dragCounter = 0; // 用计数器避免子元素触发 dragleave 时误隐藏
+
+  document.addEventListener('dragenter', e => {
+    e.preventDefault();
+    dragCounter++;
+    if (dragCounter === 1) showDropOverlay(e.dataTransfer);
+  });
+
+  document.addEventListener('dragover', e => {
+    e.preventDefault(); // 必须阻止默认行为才能触发 drop
+  });
+
+  document.addEventListener('dragleave', e => {
+    dragCounter--;
+    if (dragCounter === 0) hideDropOverlay();
+  });
+
+  document.addEventListener('drop', e => {
+    e.preventDefault();
+    dragCounter = 0;
+    hideDropOverlay();
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleDroppedFile(file);
+  });
+}
+
+function showDropOverlay(dataTransfer) {
+  // 根据文件类型更新提示文字
+  const overlay = document.getElementById('drop-overlay');
+  const sub = document.getElementById('drop-overlay-sub');
+  overlay.classList.add('show');
+
+  // 尝试读取拖入文件的类型
+  const item = dataTransfer?.items?.[0];
+  if (item) {
+    if (item.type === 'application/pdf') {
+      sub.textContent = 'PDF 文件 — 将自动提取文字内容';
+    } else if (item.type.startsWith('image/')) {
+      sub.textContent = '图片截图 — 将通过 AI 识别文字';
+    } else {
+      sub.textContent = '支持 PDF、图片截图、.txt 文件';
+    }
+  }
+}
+function hideDropOverlay() {
+  document.getElementById('drop-overlay').classList.remove('show');
+}
+
+/* 统一处理拖入的文件 */
+async function handleDroppedFile(file) {
+  const name = file.name.toLowerCase();
+  const type = file.type;
+
+  // 自动切换到第一章 Tab（如果当前不在）
+  const ch1Tab = document.querySelector('.tab');
+  if (!document.getElementById('panel-ch1').style.display || document.getElementById('panel-ch1').style.display === 'flex') {
+    // 已在第一章，无需切换
+  } else {
+    ch1Tab.click();
+  }
+
+  if (type === 'application/pdf' || name.endsWith('.pdf')) {
+    await handleDroppedPDF(file);
+  } else if (type.startsWith('image/')) {
+    handleDroppedImage(file);
+  } else if (type === 'text/plain' || name.endsWith('.txt') || name.endsWith('.md')) {
+    handleDroppedText(file);
+  } else {
+    toast('不支持此格式，请使用 PDF、图片或 .txt 文件');
+  }
+}
+
+/* ------ 拖入 PDF：提取文字后自动分析 ------ */
+async function handleDroppedPDF(file) {
+  const pdfjs = window['pdfjs-dist/build/pdf'];
+  if (!pdfjs) {
+    // PDF.js 未加载（可能无网络），提示用户
+    hideChatEmpty();
+    addAiMsg('PDF.js 库未能加载（需要联网），无法自动提取文字。\n\n请手动操作：打开 PDF → 全选（Ctrl+A）→ 复制（Ctrl+C）→ 切换「粘贴文字」模式 → 粘贴。');
+    return;
+  }
+
+  hideChatEmpty();
+  addUserMsg(`[拖入文件] ${file.name}`);
+  const typingId = addTypingBubble();
+
+  try {
+    // 读取文件为 ArrayBuffer
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+    const totalPages = pdf.numPages;
+
+    let fullText = '';
+    // 逐页提取文字（最多前20页，避免太长）
+    const maxPages = Math.min(totalPages, 20);
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map(item => item.str)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (pageText) fullText += pageText + '\n\n';
+    }
+
+    removeTypingBubble(typingId);
+
+    if (fullText.trim().length < 30) {
+      // 可能是扫描版PDF（图片）
+      addAiMsg(`"${file.name}" 是扫描版 PDF（图片格式），无法直接提取文字。\n\n请将 PDF 用截图工具截图，然后拖入此区域，AI 将通过视觉识别读取内容。`);
+      return;
+    }
+
+    const charCount = fullText.length;
+    addAiMsg(`已从 "${file.name}" 提取到 ${charCount} 字（共${totalPages}页，读取前${maxPages}页）。\n\n正在自动开始分析三个前期分析页面…`);
+
+    // 自动触发分析
+    await analyzeAllWithText(fullText);
+
+  } catch(e) {
+    removeTypingBubble(typingId);
+    addAiMsg(`PDF 解析出错：${e.message}\n\n请尝试手动复制文字粘贴，或将 PDF 截图后拖入。`);
+  }
+}
+
+/* ------ 拖入图片：切换到截图模式并预填 ------ */
+function handleDroppedImage(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    // 切换到截图模式
+    const imgBtn = document.querySelectorAll('.im-btn')[2];
+    setInputMode(imgBtn, 'image');
+
+    S.imageData = { base64url: e.target.result, mimeType: file.type };
+    document.getElementById('img-zone').style.display = 'none';
+    const wrap = document.getElementById('img-preview-wrap');
+    wrap.style.display = '';
+    document.getElementById('img-preview-src').src = e.target.result;
+    toast('截图已加载，点击「AI 一键分析三页」开始分析');
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ------ 拖入文本文件 ------ */
+function handleDroppedText(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    // 切换到粘贴文字模式
+    const textBtn = document.querySelectorAll('.im-btn')[0];
+    setInputMode(textBtn, 'text');
+    document.getElementById('raw-text').value = text;
+    toast(`"${file.name}" 已加载，点击「AI 一键分析三页」开始分析`);
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+/* ================================================
+   将提取好的文字直接送入分析（无需用户再点按钮）
+================================================ */
+async function analyzeAllWithText(text) {
+  if (!S.apiKey) {
+    toast('请先配置 API Key');
+    openSettings();
+    return;
+  }
+
+  const prompt = `你是专业景观设计文案整理师，请分析以下建筑/项目说明文本，同时提取三个分析页面的内容：
+
+1. 区位分析：地理位置、周边环境、交通条件、区域配套
+2. 基地分析：场地条件、地形地貌、植被水体、现状特点
+3. 建筑分析：建筑风格、空间布局、立面材质、与景观的关系
+
+每页提供：
+- title：标题（3-6字）
+- content：正文（150-220字，专业简洁，可直接用于景观设计说明书）
+- keywords：3-5个关键词数组
+
+仅返回JSON：
+{
+  "location": {"title":"","content":"","keywords":[]},
+  "site":     {"title":"","content":"","keywords":[]},
+  "building": {"title":"","content":"","keywords":[]}
+}
+
+原始文本内容：
+${text.slice(0, 6000)}`; // 限制6000字避免超token
+
+  const typingId = addTypingBubble();
+  setBtnLoading(true);
+
+  try {
+    const messages = [{ role: 'user', content: prompt }];
+    const raw = await callAI(messages);
+    const match = raw.match(/\{[\s\S]*\}/);
+    const data = JSON.parse(match ? match[0] : raw);
+
+    removeTypingBubble(typingId);
+
+    // 更新状态
+    ['location','site','building'].forEach(key => {
+      if (data[key]) {
+        S.pages[key].title    = data[key].title    || S.pages[key].title;
+        S.pages[key].content  = data[key].content  || '';
+        S.pages[key].keywords = data[key].keywords || [];
+      }
+    });
+
+    addAnalysisResultMsg(data);
+
+    S.chatHistory = [
+      { role: 'user', content: prompt },
+      { role: 'assistant', content: raw }
+    ];
+
+    render();
+    toast('分析完成！点击「一键全部应用」填入预览页面');
+
+  } catch(e) {
+    removeTypingBubble(typingId);
+    let errMsg = '分析失败：' + e.message;
+    if (e.message === 'Failed to fetch') {
+      errMsg = '网络请求失败。\n请检查网络连接，或确认 API Key 是否正确。';
+    }
+    addAiMsg(errMsg);
+    toast('分析失败');
+  } finally {
+    setBtnLoading(false);
+  }
+}
+
+/* ================================================
+   设置
+================================================ */
+function loadSettings() {
+  try {
+    const d = JSON.parse(localStorage.getItem('ld-tool-cfg') || '{}');
+    ['pageW','pageH','pageMargin','apiKey','provider','model','endpoint'].forEach(k => {
+      if (d[k] !== undefined) S[k] = d[k];
+    });
+  } catch(e){}
+  syncDots();
+}
+function saveSettings() {
+  S.apiKey   = document.getElementById('s-apikey').value.trim();
+  S.provider = document.getElementById('s-provider').value;
+  S.model    = document.getElementById('s-model').value;
+  S.endpoint = document.getElementById('s-endpoint').value.trim();
+  S.pageW    = +document.getElementById('s-pw').value;
+  S.pageH    = +document.getElementById('s-ph').value;
+  S.pageMargin = +document.getElementById('s-pm').value;
+  localStorage.setItem('ld-tool-cfg', JSON.stringify({
+    apiKey:S.apiKey, provider:S.provider, model:S.model,
+    endpoint:S.endpoint, pageW:S.pageW, pageH:S.pageH, pageMargin:S.pageMargin
+  }));
+  syncDots(); closeSettings(); render(); toast('设置已保存');
+}
+function openSettings() {
+  document.getElementById('s-apikey').value   = S.apiKey;
+  document.getElementById('s-provider').value = S.provider;
+  document.getElementById('s-model').value    = S.model;
+  document.getElementById('s-endpoint').value = S.endpoint || '';
+  document.getElementById('s-pw').value  = S.pageW;
+  document.getElementById('s-ph').value  = S.pageH;
+  document.getElementById('s-pm').value  = S.pageMargin;
+  updateModelList();
+  document.getElementById('modal-settings').classList.add('show');
+}
+function closeSettings() { document.getElementById('modal-settings').classList.remove('show'); }
+function updateModelList() {
+  const p = document.getElementById('s-provider').value;
+  const m = document.getElementById('s-model');
+  document.getElementById('s-doubao-row').style.display = p==='doubao' ? '' : 'none';
+  if (p==='deepseek') {
+    m.innerHTML = '<option value="deepseek-chat">deepseek-chat（推荐）</option><option value="deepseek-reasoner">deepseek-reasoner（更强，更慢）</option>';
+  } else if (p==='doubao') {
+    m.innerHTML = '<option value="doubao-pro-32k">Doubao-pro-32k</option><option value="doubao-lite-32k">Doubao-lite-32k</option>';
+  } else {
+    m.innerHTML = '<option value="gpt-4o">gpt-4o</option><option value="gpt-4o-mini">gpt-4o-mini</option>';
+  }
+}
+function syncDots() {
+  const on = !!S.apiKey;
+  ['1','2'].forEach(n => {
+    const dot = document.getElementById('dot'+n);
+    const txt = document.getElementById('dot'+n+'-text');
+    if(dot) dot.className = 'status-dot' + (on?' on':'');
+    if(txt) txt.textContent = on ? `已连接 ${S.provider}` : '未配置 API Key';
+  });
+}
+
+/* ================================================
+   Tab 切换
+================================================ */
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('panel-ch1').style.display = tab==='ch1' ? 'flex' : 'none';
+  document.getElementById('panel-ch2').style.display = tab==='ch2' ? '' : 'none';
+}
+
+/* ================================================
+   输入模式切换
+================================================ */
+function setInputMode(el, mode) {
+  document.querySelectorAll('.im-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  S.inputMode = mode;
+  document.getElementById('mode-text').style.display  = mode==='text'  ? '' : 'none';
+  document.getElementById('mode-file').style.display  = mode==='file'  ? '' : 'none';
+  document.getElementById('mode-image').style.display = mode==='image' ? '' : 'none';
+}
+
+/* ------ 文件上传（.txt / .md，拦截 PDF） ------ */
+function handleFileUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  // 先读取前几个字节，检测是否是 PDF
+  const sniffReader = new FileReader();
+  sniffReader.onload = e => {
+    const head = e.target.result;
+    const isPDF = head.startsWith('%PDF') || file.name.toLowerCase().endsWith('.pdf');
+    document.getElementById('file-pdf-error').style.display = isPDF ? '' : 'none';
+
+    if (isPDF) {
+      // 提示用户切换到粘贴模式
+      input.value = '';
+      return;
+    }
+
+    // 正常读取文本
+    const textReader = new FileReader();
+    textReader.onload = ev => {
+      S.fileText = ev.target.result;
+      document.getElementById('file-zone').style.display = 'none';
+      document.getElementById('file-loaded').style.display = 'flex';
+      document.getElementById('file-name').textContent = file.name;
+      document.getElementById('file-pdf-error').style.display = 'none';
+    };
+    textReader.readAsText(file, 'UTF-8');
+  };
+  // 只读前 8 字节用于嗅探文件类型
+  sniffReader.readAsText(file.slice(0, 8));
+  input.value = '';
+}
+function clearFile() {
+  S.fileText = null;
+  document.getElementById('file-zone').style.display = '';
+  document.getElementById('file-loaded').style.display = 'none';
+}
+
+/* ------ 截图上传 ------ */
+function handleImageUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    S.imageData = { base64url: e.target.result, mimeType: file.type };
+    document.getElementById('img-zone').style.display = 'none';
+    const wrap = document.getElementById('img-preview-wrap');
+    wrap.style.display = '';
+    document.getElementById('img-preview-src').src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+function clearImage() {
+  S.imageData = null;
+  document.getElementById('img-zone').style.display = '';
+  document.getElementById('img-preview-wrap').style.display = 'none';
+}
+
+/* ================================================
+   获取当前输入内容（文字 or 文件 or 截图）
+   返回 { text, imageUrl }
+================================================ */
+function getInput() {
+  if (S.inputMode === 'text') {
+    const t = document.getElementById('raw-text').value.trim();
+    return { text: t, imageUrl: null };
+  } else if (S.inputMode === 'file') {
+    return { text: S.fileText || '', imageUrl: null };
+  } else {
+    // image mode
+    return { text: '', imageUrl: S.imageData?.base64url || null };
+  }
+}
+
+/* ================================================
+   第一章：AI 一键分析三页
+================================================ */
+async function analyzeAll() {
+  if (!S.apiKey) { toast('请先配置 API Key'); openSettings(); return; }
+
+  const { text, imageUrl } = getInput();
+  if (!text && !imageUrl) {
+    toast(S.inputMode==='image' ? '请先上传截图' : '请先提供原始文本内容');
+    return;
+  }
+
+  const prompt = `你是专业景观设计文案整理师，请分析以下建筑/项目说明文本，同时提取三个分析页面的内容：
+
+1. 区位分析：地理位置、周边环境、交通条件、区域配套
+2. 基地分析：场地条件、地形地貌、植被水体、现状特点
+3. 建筑分析：建筑风格、空间布局、立面材质、与景观的关系
+
+每页提供：
+- title：标题（3-6字）
+- content：正文（150-220字，专业简洁，可直接用于景观设计说明书）
+- keywords：3-5个关键词数组
+
+仅返回JSON，格式：
+{
+  "location": {"title":"","content":"","keywords":[]},
+  "site":     {"title":"","content":"","keywords":[]},
+  "building": {"title":"","content":"","keywords":[]}
+}
+
+原始文本内容：
+${text || '[图片内容，请识别并分析]'}`;
+
+  // 显示用户消息（文本或图片）
+  hideChatEmpty();
+  if (imageUrl) {
+    addUserMsg('[截图] 请分析这张图片并提取三个分析页面的内容');
+  } else {
+    addUserMsg('请分析以下内容并同时填写三个前期分析页面：\n\n' + text.slice(0, 100) + (text.length > 100 ? '…' : ''));
+  }
+
+  // 显示等待气泡
+  const typingId = addTypingBubble();
+  setBtnLoading(true);
+
+  try {
+    // 构建消息（支持图片）
+    let messages;
+    if (imageUrl) {
+      messages = [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: imageUrl } },
+          { type: 'text', text: prompt }
+        ]
+      }];
+    } else {
+      messages = [{ role: 'user', content: prompt }];
+    }
+
+    const raw = await callAI(messages);
+    let data;
+    try {
+      // 提取JSON（防止AI在JSON外加了文字）
+      const match = raw.match(/\{[\s\S]*\}/);
+      data = JSON.parse(match ? match[0] : raw);
+    } catch(e) {
+      throw new Error('AI 返回格式异常，请重试');
+    }
+
+    removeTypingBubble(typingId);
+
+    // 更新状态
+    ['location','site','building'].forEach(key => {
+      if (data[key]) {
+        S.pages[key].title    = data[key].title    || S.pages[key].title;
+        S.pages[key].content  = data[key].content  || '';
+        S.pages[key].keywords = data[key].keywords || [];
+      }
+    });
+
+    // 渲染结果卡片
+    addAnalysisResultMsg(data);
+
+    // 更新对话历史（用文字摘要，不带图片）
+    S.chatHistory = [
+      { role: 'user', content: imageUrl ? '[用户上传了截图]' : prompt },
+      { role: 'assistant', content: raw }
+    ];
+
+    render();
+    toast('三页内容已同时分析完成，可继续对话修改！');
+
+  } catch(e) {
+    removeTypingBubble(typingId);
+    let errMsg = '分析失败：' + e.message;
+    if (e.message === 'Failed to fetch') {
+      errMsg = '网络请求失败（Failed to fetch）\n\n可能原因：\n① 网络问题，请检查是否能正常访问互联网\n② API Key 填写有误，请点右上角「设置」重新确认\n③ 部分企业/学校网络会屏蔽 AI 接口，可尝试用手机热点';
+    } else if (e.message.includes('401') || e.message.includes('Unauthorized')) {
+      errMsg = 'API Key 无效（401错误）\n\n请点右上角「设置」重新填写正确的 API Key。';
+    } else if (e.message.includes('429')) {
+      errMsg = '请求频率超限（429错误）\n\n请等待几秒后再试。';
+    }
+    addAiMsg(errMsg);
+    toast('分析失败，请查看对话框中的错误说明');
+  } finally {
+    setBtnLoading(false);
+  }
+}
+
+/* ================================================
+   第一章：继续对话
+================================================ */
+async function sendChat() {
+  if (S.isChatting) return;
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  if (!S.apiKey) { toast('请先配置 API Key'); openSettings(); return; }
+  if (S.chatHistory.length === 0) {
+    toast('请先点击"AI一键分析三页"开始分析');
+    return;
+  }
+
+  input.value = '';
+  input.style.height = 'auto';
+
+  hideChatEmpty();
+  addUserMsg(msg);
+  const typingId = addTypingBubble();
+  S.isChatting = true;
+  document.getElementById('send-btn').disabled = true;
+
+  // 构建对话历史（只用文字，不含图片）
+  const messages = [
+    // 系统指令（以user消息形式嵌入，因部分API不支持system role）
+    ...S.chatHistory,
+    {
+      role: 'user',
+      content: msg + '\n\n（如果你修改了某个分析页面的内容，请在回复末尾用如下格式附上更新后的完整内容，方便我应用：\n[更新内容]\n区位分析：xxx\n基地分析：xxx\n建筑分析：xxx）'
+    }
+  ];
+
+  try {
+    const raw = await callAI(messages);
+    removeTypingBubble(typingId);
+
+    // 更新对话历史
+    S.chatHistory.push({ role: 'user', content: msg });
+    S.chatHistory.push({ role: 'assistant', content: raw });
+
+    // 尝试从回复中解析更新内容
+    const updated = parseUpdatesFromReply(raw);
+
+    addFollowupMsg(raw, updated);
+
+    if (Object.keys(updated).length > 0) {
+      // 自动应用解析到的更新
+      Object.keys(updated).forEach(key => {
+        if (S.pages[key] !== undefined) {
+          S.pages[key].content = updated[key];
+        }
+      });
+      render();
+    }
+
+  } catch(e) {
+    removeTypingBubble(typingId);
+    addAiMsg('回复失败：' + e.message);
+  } finally {
+    S.isChatting = false;
+    document.getElementById('send-btn').disabled = false;
+  }
+}
+
+/* 解析AI回复中的更新内容标记 */
+function parseUpdatesFromReply(text) {
+  const result = {};
+  const map = { '区位分析': 'location', '基地分析': 'site', '建筑分析': 'building' };
+  Object.keys(map).forEach(label => {
+    // 匹配 "区位分析：xxx" 或 "区位分析:\nxxx"
+    const regex = new RegExp(label + '[：:][\\s]*(.*?)(?=区位分析|基地分析|建筑分析|$)', 's');
+    const m = text.match(regex);
+    if (m && m[1] && m[1].trim().length > 30) {
+      result[map[label]] = m[1].trim();
+    }
+  });
+  return result;
+}
+
+/* Enter发送 */
+function handleChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
+  // 自动高度
+  const ta = e.target;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 72) + 'px';
+}
+
+/* ================================================
+   聊天UI操作
+================================================ */
+function hideChatEmpty() {
+  const el = document.getElementById('chat-empty');
+  if (el) el.style.display = 'none';
+}
+
+function addUserMsg(text) {
+  const area = document.getElementById('chat-area');
+  const div = document.createElement('div');
+  div.className = 'chat-msg user-msg';
+  div.innerHTML = `
+    <div class="msg-avatar user">我</div>
+    <div class="msg-body">
+      <div class="msg-bubble user-bubble" style="white-space:pre-wrap;">${escHtml(text)}</div>
+    </div>`;
+  area.appendChild(div);
+  scrollChatBottom();
+}
+
+function addAiMsg(text) {
+  const area = document.getElementById('chat-area');
+  const div = document.createElement('div');
+  div.className = 'chat-msg';
+  div.innerHTML = `
+    <div class="msg-avatar ai">AI</div>
+    <div class="msg-body">
+      <div class="msg-bubble ai-bubble" style="white-space:pre-wrap;">${escHtml(text)}</div>
+    </div>`;
+  area.appendChild(div);
+  scrollChatBottom();
+}
+
+/* 渲染初始分析结果（三个结构化卡片 + 一键全部应用） */
+function addAnalysisResultMsg(data) {
+  const area = document.getElementById('chat-area');
+  const secs = [
+    { key:'location', label:'区位分析', color:'#0071e3' },
+    { key:'site',     label:'基地分析', color:'#34c759' },
+    { key:'building', label:'建筑分析', color:'#ff9500' },
+  ];
+
+  // 给本次消息一个唯一id，供按钮使用
+  const msgId = 'result-' + Date.now();
+
+  let cardsHtml = secs.map(sec => {
+    const d = data[sec.key];
+    if (!d) return '';
+    const kws = (d.keywords||[]).map(k=>`<span class="kw-tag">${escHtml(k)}</span>`).join('');
+    return `
+    <div class="sec-card">
+      <div class="sec-card-head">
+        <div class="sec-card-label">
+          <div class="sec-card-dot" style="background:${sec.color};"></div>
+          ${sec.label}
+        </div>
+        <button class="apply-btn-sm" id="apply-${msgId}-${sec.key}"
+          onclick="applyOneSection('${sec.key}','${msgId}')">应用到预览</button>
+      </div>
+      <div class="sec-card-body">
+        <div class="sec-card-title">${escHtml(d.title||sec.label)}</div>
+        <div class="sec-card-text">${escHtml(d.content||'')}</div>
+        ${kws ? `<div class="sec-card-kws">${kws}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  const div = document.createElement('div');
+  div.className = 'chat-msg';
+  div.id = msgId;
+  div.dataset.result = JSON.stringify(data); // 存储数据供按钮重新应用
+  div.innerHTML = `
+    <div class="msg-avatar ai">AI</div>
+    <div class="msg-body" style="width:100%;">
+      <div class="msg-bubble ai-bubble" style="margin-bottom:8px;">
+        三页内容已分析完成！<br>
+        <span style="color:var(--text-secondary);font-size:11px;">查看下方内容，满意后点按钮应用到右侧预览</span>
+      </div>
+      ${cardsHtml}
+      <!-- 一键全部应用（最显眼的操作） -->
+      <button id="apply-all-${msgId}" onclick="applyAllSections('${msgId}')"
+        style="width:100%;margin-top:8px;padding:10px;border-radius:9px;
+          background:#1d1d1f;color:white;border:none;font-size:13px;font-weight:600;
+          cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;
+          transition:background 0.15s;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        一键将三页内容全部应用到预览
+      </button>
+    </div>`;
+  area.appendChild(div);
+  scrollChatBottom();
+}
+
+/* 渲染跟进回复（纯文字 + 应用按钮） */
+function addFollowupMsg(text, updatedSections) {
+  const area = document.getElementById('chat-area');
+  // 清理text中的[更新内容]标记部分，只显示正文
+  const displayText = text.replace(/\[更新内容\][\s\S]*/,'').trim();
+
+  const secMap = [
+    { key:'location', label:'区位分析' },
+    { key:'site',     label:'基地分析' },
+    { key:'building', label:'建筑分析' },
+  ];
+
+  // 如果自动解析到了更新，显示已应用提示
+  const hasUpdates = Object.keys(updatedSections).length > 0;
+  const updateHint = hasUpdates
+    ? `<div style="font-size:11px;color:#34c759;padding:5px 12px;display:flex;align-items:center;gap:4px;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        已自动更新：${Object.keys(updatedSections).map(k=>secMap.find(s=>s.key===k)?.label).filter(Boolean).join('、')}
+       </div>`
+    : '';
+
+  // 手动应用按钮行
+  const applyButtons = secMap.map(s =>
+    `<button class="apply-to-btn" onclick="applyFollowupToSection('${s.key}', \`${escHtml(displayText)}\`, this)">${s.label}</button>`
+  ).join('');
+
+  const msgFollowId = 'followup-' + Date.now();
+  const div = document.createElement('div');
+  div.className = 'chat-msg';
+  div.id = msgFollowId;
+  div.dataset.followText = displayText; // 存储文本，供一键应用按钮重复点击使用
+  div.innerHTML = `
+    <div class="msg-avatar ai">AI</div>
+    <div class="msg-body" style="max-width:calc(100% - 36px);">
+      <div class="msg-bubble ai-bubble" style="white-space:pre-wrap;">${escHtml(displayText)}</div>
+      ${updateHint}
+      <div class="apply-row">
+        <span class="apply-row-label">应用到：</span>
+        ${applyButtons}
+      </div>
+      <!-- 一键应用全部，可反复点击替换 -->
+      <button onclick="applyFollowupAll('${msgFollowId}', this)"
+        style="width:100%;margin-top:6px;padding:9px;border-radius:9px;
+          background:#1d1d1f;color:white;border:none;font-size:13px;font-weight:600;
+          cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;
+          transition:background 0.15s;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        一键应用到全部三页
+      </button>
+    </div>`;
+  area.appendChild(div);
+  scrollChatBottom();
+}
+
+/* 应用某个结构化卡片到对应页面（从消息的 dataset 中读取数据） */
+function applyOneSection(key, msgId) {
+  const msgEl = document.getElementById(msgId);
+  if (msgEl && msgEl.dataset.result) {
+    const data = JSON.parse(msgEl.dataset.result);
+    if (data[key]) {
+      S.pages[key].title    = data[key].title    || S.pages[key].title;
+      S.pages[key].content  = data[key].content  || '';
+      S.pages[key].keywords = data[key].keywords || [];
+    }
+  }
+  render();
+  const btn = document.getElementById(`apply-${msgId}-${key}`);
+  if (btn) { btn.textContent = '✓ 已应用'; btn.classList.add('applied'); }
+  const labels = { location:'区位', site:'基地', building:'建筑' };
+  toast(`${labels[key]||''}分析已应用到预览`);
+}
+
+/* 一键将三页内容全部应用 */
+function applyAllSections(msgId) {
+  const msgEl = document.getElementById(msgId);
+  if (!msgEl || !msgEl.dataset.result) { toast('数据读取失败，请重新分析'); return; }
+  const data = JSON.parse(msgEl.dataset.result);
+  ['location','site','building'].forEach(key => {
+    if (data[key]) {
+      S.pages[key].title    = data[key].title    || S.pages[key].title;
+      S.pages[key].content  = data[key].content  || '';
+      S.pages[key].keywords = data[key].keywords || [];
+    }
+    const btn = document.getElementById(`apply-${msgId}-${key}`);
+    if (btn) { btn.textContent = '✓ 已应用'; btn.classList.add('applied'); }
+  });
+  render();
+  // 短暂绿色反馈后恢复，保持可再次点击
+  const allBtn = document.getElementById(`apply-all-${msgId}`);
+  if (allBtn) {
+    const origHtml = allBtn.innerHTML;
+    allBtn.style.background = '#34c759';
+    allBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ✓ 已应用，可再次点击替换`;
+    setTimeout(() => {
+      allBtn.style.background = '#1d1d1f';
+      allBtn.innerHTML = origHtml;
+    }, 2000);
+  }
+  toast('三页内容已全部应用到右侧预览！');
+}
+
+/* 一键将跟进回复应用到全部三页（可反复点击替换） */
+function applyFollowupAll(msgId, btn) {
+  const msgEl = document.getElementById(msgId);
+  if (!msgEl) return;
+  const text = msgEl.dataset.followText || '';
+  if (!text) { toast('没有可应用的内容'); return; }
+  ['location','site','building'].forEach(key => {
+    S.pages[key].content = text;
+  });
+  render();
+  // 短暂绿色反馈后恢复原样，让用户知道可以再次点击
+  const orig = btn.innerHTML;
+  btn.style.background = '#34c759';
+  btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ✓ 已应用，可再次点击替换`;
+  setTimeout(() => {
+    btn.style.background = '#1d1d1f';
+    btn.innerHTML = orig;
+  }, 2000);
+  toast('内容已应用到全部三页，可继续修改后再次点击替换');
+}
+
+/* 将跟进回复的内容应用到指定页面 */
+function applyFollowupToSection(key, text, btn) {
+  const clean = text.replace(/\[更新内容\][\s\S]*/,'').trim();
+  S.pages[key].content = clean;
+  render();
+  btn.textContent = '✓ 已应用';
+  btn.style.borderColor = '#34c759';
+  btn.style.color = '#34c759';
+  toast('内容已应用');
+}
+
+/* 等待气泡 */
+function addTypingBubble() {
+  const id = 'typing-' + Date.now();
+  const area = document.getElementById('chat-area');
+  const div = document.createElement('div');
+  div.className = 'chat-msg'; div.id = id;
+  div.innerHTML = `
+    <div class="msg-avatar ai">AI</div>
+    <div class="msg-body">
+      <div class="typing-bubble">
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+      </div>
+    </div>`;
+  area.appendChild(div);
+  scrollChatBottom();
+  return id;
+}
+function removeTypingBubble(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+function scrollChatBottom() {
+  const area = document.getElementById('chat-area');
+  setTimeout(() => { area.scrollTop = area.scrollHeight; }, 50);
+}
+
+function setBtnLoading(loading) {
+  const btn = document.getElementById('analyze-btn');
+  btn.disabled = loading;
+  btn.innerHTML = loading
+    ? `<div class="spinner"></div> AI 正在分析中…`
+    : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> AI 一键分析前期分析三页`;
+}
+
+function escHtml(str) {
+  return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ================================================
+   第二章：设计构思
+================================================ */
+async function generateConcepts() {
+  if (!S.apiKey) { toast('请先配置 API Key'); openSettings(); return; }
+  const name  = document.getElementById('proj-name').value.trim();
+  const loc   = document.getElementById('proj-loc').value.trim();
+  const type  = document.getElementById('proj-type').value;
+  const kw    = document.getElementById('proj-kw').value.trim();
+  const extra = document.getElementById('proj-extra').value.trim();
+  if (!name || !loc) { toast('请填写项目名称和地点'); return; }
+
+  const prompt = `你是资深景观设计师。为以下项目生成3个风格各异的设计构思方案，深入挖掘该地点的地理环境、历史文化、气候特点。
+
+项目信息：名称:${name} | 地点:${loc} | 类型:${type} | 风格:${kw||'未指定'} | 补充:${extra||'无'}
+
+每个方案包含：
+1. name：方案名称（4-8字，富有诗意）
+2. tagline：一句话简介（15字以内）
+3. inspiration：灵感来源（100-150字，文化/自然背景）
+4. concept：设计理念（150-200字，核心逻辑和手法）
+5. zones：主题分区（3-5个，格式"分区名：主题描述"，换行分隔）
+
+仅返回JSON：{"versions":[{"name":"","tagline":"","inspiration":"","concept":"","zones":""},{"name":"","tagline":"","inspiration":"","concept":"","zones":""},{"name":"","tagline":"","inspiration":"","concept":"","zones":""}]}`;
+
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner" style="border-color:rgba(255,255,255,.4);border-top-color:white;"></div> AI 构思中…';
+
+  try {
+    const raw = await callAI([{ role:'user', content:prompt }], true);
+    const m = raw.match(/\{[\s\S]*\}/);
+    const d = JSON.parse(m ? m[0] : raw);
+    S.genVersions = d.versions || [];
+    renderVersionCards();
+    goStep(2);
+    toast('三个版本已生成，请选择！');
+  } catch(e) {
+    toast('生成失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> 生成三个设计构思版本';
+  }
+}
+
+function renderVersionCards() {
+  const tags = ['方案 A','方案 B','方案 C'];
+  document.getElementById('version-list').innerHTML = S.genVersions.map((v,i) => `
+    <div class="version-card" onclick="pickVersion(this,${i})">
+      <div class="version-tag">${tags[i]||'方案'+(i+1)}</div>
+      <div class="version-name">${v.name}</div>
+      <div class="version-tagline">${v.tagline}</div>
+    </div>
+  `).join('');
+  S.selVersion = null;
+}
+function pickVersion(el, i) {
+  document.querySelectorAll('.version-card').forEach(c=>c.classList.remove('selected'));
+  el.classList.add('selected'); S.selVersion = i;
+}
+function confirmVersion() {
+  if (S.selVersion === null) { toast('请先点击选择一个版本'); return; }
+  const v = S.genVersions[S.selVersion];
+  document.getElementById('inspo').value   = v.inspiration || '';
+  document.getElementById('concept').value = v.concept     || '';
+  document.getElementById('zones').value   = v.zones       || '';
+  goStep(3);
+}
+function backToStep1() { goStep(1); }
+function backToStep2() { goStep(2); }
+function goStep(n) {
+  document.getElementById('ch2-s1').style.display = n===1 ? '' : 'none';
+  document.getElementById('ch2-s2').style.display = n===2 ? '' : 'none';
+  document.getElementById('ch2-s3').style.display = n===3 ? '' : 'none';
+  [1,2,3].forEach(i => {
+    document.getElementById('s'+i).className = 'step-item'+(i<n?' done':i===n?' active':'');
+  });
+}
+function applyToPage(chapter) {
+  S.pages.inspo.content   = document.getElementById('inspo').value;
+  S.pages.concept.content = document.getElementById('concept').value;
+  S.pages.zones.content   = document.getElementById('zones').value;
+  render(); toast('已应用到预览页面');
+}
+
+/* ================================================
+   AI API 调用
+================================================ */
+async function callAI(messages, jsonMode = true) {
+  let url, headers, body;
+
+  if (S.provider === 'deepseek') {
+    url = 'https://api.deepseek.com/chat/completions';
+    headers = { 'Content-Type':'application/json', 'Authorization':'Bearer '+S.apiKey };
+    body = { model: S.model, messages, ...(jsonMode ? { response_format:{type:'json_object'} } : {}) };
+  } else if (S.provider === 'doubao') {
+    url = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+    headers = { 'Content-Type':'application/json', 'Authorization':'Bearer '+S.apiKey };
+    body = { model: S.endpoint || S.model, messages };
+  } else {
+    url = 'https://api.openai.com/v1/chat/completions';
+    headers = { 'Content-Type':'application/json', 'Authorization':'Bearer '+S.apiKey };
+    body = { model: S.model, messages, ...(jsonMode ? { response_format:{type:'json_object'} } : {}) };
+  }
+
+  const resp = await fetch(url, { method:'POST', headers, body:JSON.stringify(body) });
+  if (!resp.ok) {
+    const e = await resp.json().catch(()=>({error:{message:'HTTP '+resp.status}}));
+    throw new Error(e.error?.message || 'HTTP '+resp.status);
+  }
+  const d = await resp.json();
+  return d.choices[0].message.content;
+}
+
+/* ================================================
+   页面渲染（A3 预览）
+   1mm ≈ 3.7795px @96dpi
+================================================ */
+const MM = 3.7795;
+
+function render() {
+  const { pageW, pageH, pageMargin } = S;
+  const pw = Math.round(pageW * MM * S.zoom);
+  const ph = Math.round(pageH * MM * S.zoom);
+  const mg = Math.round(pageMargin * MM * S.zoom);
+  const iw = pw - mg * 2;
+  const ih = ph - mg * 2;
+
+  const pages = [
+    page_location(pw, ph, mg, iw, ih),
+    page_site(pw, ph, mg, iw, ih),
+    page_building(pw, ph, mg, iw, ih),
+    page_inspiration(pw, ph, mg, iw, ih),
+    page_concept(pw, ph, mg, iw, ih),
+    page_zones(pw, ph, mg, iw, ih),
+  ];
+
+  document.getElementById('pg-count').textContent = pages.length;
+  document.getElementById('pages-wrap').innerHTML = pages.map((html, i) => `
+    <div class="page-wrap">
+      <div class="page-num-label">P${i+1}</div>
+      <div class="a3-page" style="width:${pw}px;height:${ph}px;">${html}</div>
+    </div>
+  `).join('');
+}
+
+function doZoom(dir) {
+  S.zoom = Math.min(1.2, Math.max(0.3, +(S.zoom + dir * 0.1).toFixed(1)));
+  document.getElementById('zoom-txt').textContent = Math.round(S.zoom*100) + '%';
+  render();
+}
+
+/* ---- 通用：页眉 ---- */
+function hdr(chapter, title, mg, color) {
+  const z = S.zoom;
+  return `
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;
+    padding-bottom:${Math.round(mg*0.28)}px;margin-bottom:${Math.round(mg*0.3)}px;
+    border-bottom:${Math.round(2*z)}px solid ${color};">
+    <div>
+      <div style="font-size:${Math.round(9*z)}px;color:#8e8e93;font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:${Math.round(2*z)}px;">${chapter}</div>
+      <div style="font-size:${Math.round(20*z)}px;font-weight:700;letter-spacing:-0.5px;color:#1d1d1f;">${title}</div>
+    </div>
+    <div style="font-size:${Math.round(9*z)}px;color:#aeaeb2;">景观方案设计</div>
+  </div>`;
+}
+
+/* ---- 通用：图片占位符 ---- */
+let _imgIdx = 0;
+function slot(w, h, label) {
+  const id = 'slot-' + (++_imgIdx);
+  const wS = typeof w==='number' ? w+'px' : w;
+  const hS = typeof h==='number' ? h+'px' : h;
+  const z = S.zoom;
+  return `
+  <div class="img-slot" id="${id}" onclick="uploadSlot('${id}')"
+    style="width:${wS};height:${hS};min-height:${Math.round(40*z)}px;">
+    <svg width="${Math.round(22*z)}" height="${Math.round(22*z)}" viewBox="0 0 24 24" fill="none" stroke="#c7c7cc" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    <span style="font-size:${Math.round(10*z)}px;color:#aeaeb2;margin-top:${Math.round(4*z)}px;">${label}</span>
+  </div>`;
+}
+
+/* ====== 页1：区位分析 ====== */
+function page_location(pw, ph, mg, iw, ih) {
+  const z = S.zoom; const d = S.pages.location;
+  const kws = d.keywords.length ? d.keywords : ['区位优越','交通便利','配套完善'];
+  const lw = Math.round(iw * 0.57);
+  const rw = iw - lw - Math.round(mg * 0.4);
+  return `
+  <div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
+    ${hdr('Chapter 01 · 前期分析', d.title||'区位分析', mg, '#0071e3')}
+    <div style="flex:1;display:flex;gap:${Math.round(mg*0.4)}px;min-height:0;">
+      <div style="width:${lw}px;display:flex;flex-direction:column;gap:${Math.round(mg*0.3)}px;">
+        ${slot(lw, '65%', '区位总图')}
+        <div style="flex:1;display:flex;gap:${Math.round(mg*0.3)}px;">
+          <div style="flex:1;">${slot('100%','100%','交通分析图')}</div>
+          <div style="flex:1;">${slot('100%','100%','周边配套图')}</div>
+        </div>
+      </div>
+      <div style="width:${rw}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.5)}px;">
+        <div style="font-size:${Math.round(11*z)}px;line-height:1.85;color:#3a3a3c;">
+          ${d.content||'项目位于城市核心区域，地理位置优越。周边配套设施完善，教育、医疗、商业资源丰富。区域交通网络发达，是理想的景观设计基地。'}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:${Math.round(6*z)}px;">
+          ${kws.map(k=>`<div style="display:flex;align-items:center;gap:${Math.round(8*z)}px;"><div style="width:${Math.round(5*z)}px;height:${Math.round(5*z)}px;border-radius:50%;background:#0071e3;flex-shrink:0;"></div><span style="font-size:${Math.round(11*z)}px;color:#1d1d1f;font-weight:500;">${k}</span></div>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ====== 页2：基地分析 ====== */
+function page_site(pw, ph, mg, iw, ih) {
+  const z = S.zoom; const d = S.pages.site;
+  const kws = d.keywords.length ? d.keywords : ['地形起伏','植被丰富','水体资源'];
+  const gap = Math.round(mg * 0.3);
+  return `
+  <div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
+    ${hdr('Chapter 01 · 前期分析', d.title||'基地分析', mg, '#34c759')}
+    <div style="flex:1;display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1.4fr 1fr;gap:${gap}px;min-height:0;">
+      <div style="grid-column:1/3;grid-row:1/2;">${slot('100%','100%','基地全景图')}</div>
+      <div style="grid-column:3/4;grid-row:1/2;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.3)}px;overflow:hidden;">
+        <div style="font-size:${Math.round(11*z)}px;line-height:1.85;color:#3a3a3c;">
+          ${d.content||'基地现状分析涵盖地形地貌、植被覆盖、水体资源及周边环境等要素，为景观设计提供充分的场地依据。'}
+        </div>
+        ${kws.map(k=>`<div style="background:rgba(52,199,89,0.1);border-radius:${Math.round(20*z)}px;padding:${Math.round(3*z)}px ${Math.round(10*z)}px;font-size:${Math.round(10*z)}px;color:#34c759;font-weight:500;display:inline-block;width:fit-content;">${k}</div>`).join('')}
+      </div>
+      <div>${slot('100%','100%','地形分析')}</div>
+      <div>${slot('100%','100%','植被现状')}</div>
+      <div>${slot('100%','100%','周边环境')}</div>
+    </div>
+  </div>`;
+}
+
+/* ====== 页3：建筑分析 ====== */
+function page_building(pw, ph, mg, iw, ih) {
+  const z = S.zoom; const d = S.pages.building;
+  const kws = d.keywords.length ? d.keywords : ['现代简约','石材幕墙','行列式布局'];
+  const gap = Math.round(mg * 0.3);
+  return `
+  <div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
+    ${hdr('Chapter 01 · 前期分析', d.title||'建筑分析', mg, '#ff9500')}
+    <div style="flex:1;display:flex;gap:${Math.round(mg*0.4)}px;min-height:0;">
+      <div style="width:${Math.round(iw*0.34)}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.4)}px;">
+        <div style="font-size:${Math.round(11*z)}px;line-height:1.85;color:#3a3a3c;">
+          ${d.content||'建筑风格现代简约，立面以玻璃幕墙与石材为主要材质，整体布局规整有序。建筑底层界面与景观的衔接关系是设计重点，需创造丰富的过渡空间。'}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:${Math.round(5*z)}px;">
+          ${kws.map(k=>`<span style="background:rgba(255,149,0,0.12);color:#e08000;border-radius:${Math.round(20*z)}px;padding:${Math.round(3*z)}px ${Math.round(10*z)}px;font-size:${Math.round(10*z)}px;font-weight:500;">${k}</span>`).join('')}
+        </div>
+      </div>
+      <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1.3fr 1fr;gap:${gap}px;">
+        <div style="grid-column:1/3;">${slot('100%','100%','建筑总体布局图')}</div>
+        <div>${slot('100%','100%','建筑立面')}</div>
+        <div>${slot('100%','100%','建筑细节/材质')}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ====== 页4：灵感来源 ====== */
+function page_inspiration(pw, ph, mg, iw, ih) {
+  const z = S.zoom; const d = S.pages.inspo;
+  const gap = Math.round(mg * 0.3);
+  return `
+  <div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
+    ${hdr('Chapter 02 · 设计构思', '灵感来源', mg, '#af52de')}
+    <div style="flex:1;position:relative;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:${gap}px;min-height:0;">
+      <div>${slot('100%','100%','灵感图 1')}</div>
+      <div>${slot('100%','100%','灵感图 2')}</div>
+      <div>${slot('100%','100%','灵感图 3')}</div>
+      <div>${slot('100%','100%','灵感图 4')}</div>
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.93);backdrop-filter:blur(12px);border-radius:${Math.round(12*z)}px;padding:${Math.round(14*z)}px ${Math.round(18*z)}px;max-width:${Math.round(iw*0.46)}px;text-align:center;box-shadow:0 ${Math.round(8*z)}px ${Math.round(28*z)}px rgba(0,0,0,0.14);">
+        <div style="font-size:${Math.round(9*z)}px;color:#af52de;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:${Math.round(7*z)}px;">INSPIRATION</div>
+        <div style="font-size:${Math.round(11*z)}px;line-height:1.8;color:#3a3a3c;">
+          ${d.content||'设计灵感源于自然山水与人文历史的交融，在传统与现代之间寻找平衡点，以景抒情，以园述史，打造富有场所精神的景观空间。'}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ====== 页5：设计理念 ====== */
+function page_concept(pw, ph, mg, iw, ih) {
+  const z = S.zoom; const d = S.pages.concept;
+  const gap = Math.round(mg * 0.35);
+  return `
+  <div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
+    ${hdr('Chapter 02 · 设计构思', '设计理念', mg, '#ff2d55')}
+    <div style="flex:1;display:flex;gap:${Math.round(mg*0.4)}px;min-height:0;">
+      <div style="flex:1;display:flex;flex-direction:column;gap:${gap}px;">
+        <div style="font-size:${Math.round(12*z)}px;font-weight:600;line-height:1.75;color:#1d1d1f;padding:${Math.round(14*z)}px;background:#fff5f7;border-radius:${Math.round(10*z)}px;border-left:${Math.round(4*z)}px solid #ff2d55;">
+          ${d.content||'以"共生"为核心理念，打造人与自然和谐共处的生态景观空间。通过多层次绿化体系与弹性活动空间的结合，实现景观与生活的深度融合，让每位居民都能在四季更迭中感受自然的律动。'}
+        </div>
+        <div style="flex:1;">${slot('100%','100%','概念分析图 / 设计逻辑图')}</div>
+      </div>
+      <div style="width:${Math.round(iw*0.38)}px;display:flex;flex-direction:column;gap:${gap}px;">
+        <div style="flex:1;">${slot('100%','100%','设计意向图 1')}</div>
+        <div style="flex:1;">${slot('100%','100%','设计意向图 2')}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ====== 页6：主题落位 ====== */
+function page_zones(pw, ph, mg, iw, ih) {
+  const z = S.zoom; const d = S.pages.zones;
+  const colors = ['#0071e3','#34c759','#ff9500','#ff2d55','#af52de','#5ac8fa'];
+  const zones = d.content
+    ? d.content.split('\n').filter(l=>l.trim()).map(l => {
+        const idx = l.indexOf('：') > -1 ? l.indexOf('：') : l.indexOf(':');
+        return idx > -1
+          ? { name: l.slice(0,idx).trim(), desc: l.slice(idx+1).trim() }
+          : { name: l.trim(), desc: '' };
+      })
+    : [
+        {name:'入口广场',desc:'活力迎宾，展示形象'},
+        {name:'中心绿地',desc:'生态休憩，共享空间'},
+        {name:'滨水栈道',desc:'亲水体验，生态廊道'},
+        {name:'运动健身区',desc:'全龄友好，活力运动'},
+        {name:'静思花园',desc:'宁静沉思，私密庇护'},
+      ];
+  return `
+  <div style="position:absolute;inset:${mg}px;display:flex;flex-direction:column;">
+    ${hdr('Chapter 02 · 设计构思', '主题落位', mg, '#5ac8fa')}
+    <div style="flex:1;display:flex;gap:${Math.round(mg*0.45)}px;min-height:0;">
+      <div style="flex:1;">${slot('100%','100%','总平面图（含分区标注）')}</div>
+      <div style="width:${Math.round(iw*0.35)}px;display:flex;flex-direction:column;justify-content:center;gap:${Math.round(mg*0.35)}px;overflow:hidden;">
+        ${zones.map((zone,i)=>`
+        <div style="display:flex;gap:${Math.round(10*z)}px;align-items:flex-start;">
+          <div style="width:${Math.round(26*z)}px;height:${Math.round(26*z)}px;background:${colors[i%colors.length]};border-radius:${Math.round(6*z)}px;display:flex;align-items:center;justify-content:center;color:white;font-size:${Math.round(11*z)}px;font-weight:700;flex-shrink:0;">${String.fromCharCode(65+i)}</div>
+          <div style="overflow:hidden;">
+            <div style="font-size:${Math.round(11.5*z)}px;font-weight:600;color:#1d1d1f;margin-bottom:${Math.round(2*z)}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${zone.name}</div>
+            <div style="font-size:${Math.round(10.5*z)}px;color:#6e6e73;line-height:1.5;">${zone.desc}</div>
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ================================================
+   图片上传（点击占位符）
+================================================ */
+function uploadSlot(id) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = `<img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover;display:block;">`;
+      el.style.border = 'none'; el.style.background = 'none';
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+/* ================================================
+   自建 ZIP 构建器（替代 JSZip）
+   IDML 规范：
+   - mimetype 必须第一个，STORE 压缩，extra field = 0
+   - 其余文件用 DEFLATE（与真实 InDesign 导出的 IDML 一致）
+   - 使用浏览器内置 CompressionStream（Chrome 80+ / Edge 80+ 均支持）
+================================================ */
+function _makeCRC32Table() {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+}
+const _CRC32_TABLE = _makeCRC32Table();
+
+function _crc32(data) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < data.length; i++)
+    c = (_CRC32_TABLE[(c ^ data[i]) & 0xFF] ^ (c >>> 8)) >>> 0;
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+/* 用浏览器内置 DeflateRaw 压缩数据（ZIP 里的 DEFLATE 是 raw deflate） */
+async function _deflateRaw(data) {
+  const cs = new CompressionStream('deflate-raw');
+  const writer = cs.writable.getWriter();
+  writer.write(data);
+  writer.close();
+  const chunks = [];
+  const reader = cs.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  let size = 0;
+  for (const c of chunks) size += c.length;
+  const out = new Uint8Array(size);
+  let pos = 0;
+  for (const c of chunks) { out.set(c, pos); pos += c.length; }
+  return out;
+}
+
+/* buildZipStore(entries) —— 返回 Promise<Uint8Array>
+   mimetype → STORE；其余文件 → DEFLATE（与真实 IDML 相同）
+   所有 local file header extra field = 0，flags = 0（纯 ASCII 路径无需 UTF-8 标志） */
+async function buildZipStore(entries) {
+  const enc = new TextEncoder();
+  const localParts = [];   // 本地文件头 + 数据块
+  const cdEntries  = [];   // 中央目录记录
+  let offset = 0;
+
+  for (const entry of entries) {
+    const name    = enc.encode(entry.name);
+    const rawData = typeof entry.data === 'string' ? enc.encode(entry.data) : entry.data;
+    const crc     = _crc32(rawData);             // CRC 用原始数据计算
+    const origSize = rawData.length;
+
+    /* mimetype 必须 STORE；其余用 DEFLATE */
+    const isMime = (entry.name === 'mimetype');
+    let compData, method, verNeeded;
+    if (isMime) {
+      compData  = rawData;
+      method    = 0;  // STORE
+      verNeeded = 10; // ZIP 1.0
+    } else {
+      compData  = await _deflateRaw(rawData);
+      /* 若压缩后反而更大（极小文件），退回 STORE */
+      if (compData.length >= origSize) { compData = rawData; method = 0; verNeeded = 10; }
+      else { method = 8; verNeeded = 20; } // DEFLATE，ZIP 2.0
+    }
+    const compSize = compData.length;
+
+    /* 本地文件头：30 字节固定 + 文件名，extra field = 0 */
+    const lh = new Uint8Array(30 + name.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0,  0x04034b50, true); // Local file header 签名
+    lv.setUint16(4,  verNeeded,  true); // 版本需求
+    lv.setUint16(6,  0x0000,     true); // flags = 0（路径全 ASCII，无需 UTF-8 标志）
+    lv.setUint16(8,  method,     true); // 压缩方式
+    lv.setUint16(10, 0,          true); // 修改时间
+    lv.setUint16(12, 0,          true); // 修改日期
+    lv.setUint32(14, crc,        true); // CRC-32（原始数据）
+    lv.setUint32(18, compSize,   true); // 压缩后大小
+    lv.setUint32(22, origSize,   true); // 原始大小
+    lv.setUint16(26, name.length,true); // 文件名长度
+    lv.setUint16(28, 0,          true); // extra field 长度 = 0（IDML 关键要求）
+    lh.set(name, 30);
+
+    cdEntries.push({ name, crc, compSize, origSize, offset, method, verNeeded });
+    localParts.push(lh, compData);
+    offset += 30 + name.length + compSize;
+  }
+
+  /* 中央目录 */
+  const cdStart  = offset;
+  const cdChunks = cdEntries.map(cd => {
+    const chunk = new Uint8Array(46 + cd.name.length);
+    const dv    = new DataView(chunk.buffer);
+    dv.setUint32(0,  0x02014b50,      true); // 中央目录签名
+    dv.setUint16(4,  20,              true); // 版本（制作方 2.0）
+    dv.setUint16(6,  cd.verNeeded,    true); // 版本（需求）
+    dv.setUint16(8,  0x0000,          true); // flags = 0
+    dv.setUint16(10, cd.method,       true); // 压缩方式
+    dv.setUint16(12, 0,               true); // 时间
+    dv.setUint16(14, 0,               true); // 日期
+    dv.setUint32(16, cd.crc,          true); // CRC-32
+    dv.setUint32(20, cd.compSize,     true); // 压缩大小
+    dv.setUint32(24, cd.origSize,     true); // 原始大小
+    dv.setUint16(28, cd.name.length,  true); // 文件名长度
+    dv.setUint16(30, 0,               true); // extra 长度 = 0
+    dv.setUint16(32, 0,               true); // 注释长度
+    dv.setUint16(34, 0,               true); // 磁盘编号
+    dv.setUint16(36, 0,               true); // 内部属性
+    dv.setUint32(38, 0,               true); // 外部属性
+    dv.setUint32(42, cd.offset,       true); // 本地头偏移
+    chunk.set(cd.name, 46);
+    return chunk;
+  });
+
+  /* EOCD（End of Central Directory）22 字节 */
+  const cdSize = cdChunks.reduce((s, c) => s + c.length, 0);
+  const eocd   = new Uint8Array(22);
+  const ev     = new DataView(eocd.buffer);
+  ev.setUint32(0,  0x06054b50,        true); // EOCD 签名
+  ev.setUint16(4,  0,                 true); // 磁盘编号
+  ev.setUint16(6,  0,                 true); // CD 起始磁盘
+  ev.setUint16(8,  cdEntries.length,  true); // 本磁盘条目数
+  ev.setUint16(10, cdEntries.length,  true); // 总条目数
+  ev.setUint32(12, cdSize,            true); // 中央目录大小
+  ev.setUint32(16, cdStart,           true); // 中央目录偏移
+  ev.setUint16(20, 0,                 true); // 注释长度
+
+  /* 拼接所有字节 */
+  const total = offset + cdSize + eocd.length;
+  const out   = new Uint8Array(total);
+  let pos = 0;
+  for (const p of localParts) { out.set(p, pos); pos += p.length; }
+  for (const c of cdChunks)   { out.set(c, pos); pos += c.length; }
+  out.set(eocd, pos);
+  return out;
+}
+
+/* ================================================
+   导出 IDML（InDesign Markup Language）
+   IDML 是 ZIP 压缩包，内含 XML，InDesign 2019+ 可直接打开
+   坐标单位：点（pt），1mm = 2.834645pt
+================================================ */
+async function exportIDML() {
+  const MM = 2.834645; // 1mm = 2.834645pt
+  const pw = S.pageW * MM;   // 页宽（pt）
+  const ph = S.pageH * MM;   // 页高（pt）
+  const mg = S.pageMargin * MM; // 页边距（pt）
+
+  // 内容区（边距内）
+  const cTop    = mg;
+  const cLeft   = mg;
+  const cBottom = ph - mg;
+  const cRight  = pw - mg;
+  const cW      = cRight - cLeft;
+  const cH      = cBottom - cTop;
+
+  // 页面数据
+  const pagesData = [
+    { id:'location', ch:'Chapter 01 · 前期分析', title: S.pages.location.title||'区位分析',  content: S.pages.location.content,  keywords: S.pages.location.keywords, color:'#0071e3',
+      layout: 'text-right', imgCount: 3 },
+    { id:'site',     ch:'Chapter 01 · 前期分析', title: S.pages.site.title||'基地分析',       content: S.pages.site.content,       keywords: S.pages.site.keywords,     color:'#34c759',
+      layout: 'text-right-grid', imgCount: 5 },
+    { id:'building', ch:'Chapter 01 · 前期分析', title: S.pages.building.title||'建筑分析',   content: S.pages.building.content,   keywords: S.pages.building.keywords, color:'#ff9500',
+      layout: 'text-left', imgCount: 3 },
+    { id:'inspo',    ch:'Chapter 02 · 设计构思', title:'灵感来源', content: S.pages.inspo.content,    keywords: [], color:'#af52de',
+      layout: 'grid-overlay', imgCount: 4 },
+    { id:'concept',  ch:'Chapter 02 · 设计构思', title:'设计理念', content: S.pages.concept.content,  keywords: [], color:'#ff2d55',
+      layout: 'text-top', imgCount: 2 },
+    { id:'zones',    ch:'Chapter 02 · 设计构思', title:'主题落位', content: S.pages.zones.content,   keywords: [], color:'#5ac8fa',
+      layout: 'list-right', imgCount: 1 },
+  ];
+
+  // 使用自建 ZIP 构建器（完全控制每个字节，确保 IDML 合规）
+  const entries = [];
+
+  /* ---- mimetype（必须第一个，不压缩） ---- */
+  entries.push({ name: 'mimetype', data: 'application/vnd.adobe.indesign-idml-package' });
+
+  /* ---- META-INF/container.xml ---- */
+  entries.push({ name: 'META-INF/container.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="designmap.xml" media-type="application/vnd.adobe.indesign-idml-package"/>
+  </rootfiles>
+</container>` });
+
+  /* ---- XML/Tags.xml ---- */
+  entries.push({ name: 'XML/Tags.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Tags xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0"></idPkg:Tags>` });
+
+  /* ---- XML/BackingStory.xml ---- */
+  entries.push({ name: 'XML/BackingStory.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <XmlStory Self="rc_BACKING_STORY" AppliedTOCStyle="n" TrackChanges="false" StoryTitle="$ID/NullString">
+    <StoryPreference OpticalMarginAlignment="false" OpticalMarginSize="12" FrameType="TextFrameType" StoryOrientation="Horizontal" StoryDirection="LeftToRightDirection"/>
+    <InCopyExportOption IncludeGraphicProxies="true" IncludeAllResources="false"/>
+  </XmlStory>
+</idPkg:Story>` });
+
+  /* ---- Resources/Fonts.xml（空文件，InDesign 自动处理字体） ---- */
+  entries.push({ name: 'Resources/Fonts.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Fonts xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <FontFamily Self="ff_msyh" Name="Microsoft YaHei">
+    <Font Self="ff_msyh_r" FontFamily="Microsoft YaHei" Name="Microsoft YaHei\tRegular" PostScriptName="MicrosoftYaHei" Status="Installed" FontStyleName="Regular" FontType="OpenType" FullName="Microsoft YaHei"/>
+    <Font Self="ff_msyh_b" FontFamily="Microsoft YaHei" Name="Microsoft YaHei\tBold"    PostScriptName="MicrosoftYaHei-Bold"   Status="Installed" FontStyleName="Bold"    FontType="OpenType" FullName="Microsoft YaHei Bold"/>
+  </FontFamily>
+</idPkg:Fonts>` });
+
+  /* ---- Resources/Graphic.xml — 必须定义所有被 Styles/Frame 引用的颜色 ---- */
+  entries.push({ name: 'Resources/Graphic.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Graphic xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <ColorGroup Self="cg_default" Name="$ID/">
+    <Color Self="Color/Black"              Name="Black"              Model="Process" Space="CMYK" ColorValue="0 0 0 100" IsSpot="false"/>
+    <Color Self="Color/C=0 M=0 Y=0 K=100" Name="C=0 M=0 Y=0 K=100" Model="Process" Space="CMYK" ColorValue="0 0 0 100" IsSpot="false"/>
+    <Color Self="Color/C=0 M=0 Y=0 K=85"  Name="C=0 M=0 Y=0 K=85"  Model="Process" Space="CMYK" ColorValue="0 0 0 85"  IsSpot="false"/>
+    <Color Self="Color/C=0 M=0 Y=0 K=80"  Name="C=0 M=0 Y=0 K=80"  Model="Process" Space="CMYK" ColorValue="0 0 0 80"  IsSpot="false"/>
+    <Color Self="Color/C=0 M=0 Y=0 K=60"  Name="C=0 M=0 Y=0 K=60"  Model="Process" Space="CMYK" ColorValue="0 0 0 60"  IsSpot="false"/>
+    <Color Self="Color/C=0 M=0 Y=0 K=15"  Name="C=0 M=0 Y=0 K=15"  Model="Process" Space="CMYK" ColorValue="0 0 0 15"  IsSpot="false"/>
+    <Color Self="Color/Gray"               Name="Gray"               Model="Process" Space="CMYK" ColorValue="0 0 0 30"  IsSpot="false"/>
+    <Color Self="Color/White"              Name="White"              Model="Process" Space="CMYK" ColorValue="0 0 0 0"   IsSpot="false"/>
+    <Color Self="Color/None"               Name="$ID/None"           Model="Process" Space="CMYK" ColorValue="0 0 0 0"   IsSpot="false"/>
+  </ColorGroup>
+</idPkg:Graphic>` });
+
+  /* ---- Resources/Preferences.xml ---- */
+  entries.push({ name: 'Resources/Preferences.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Preferences xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <DocumentPreference PageWidth="${pw.toFixed(3)}" PageHeight="${ph.toFixed(3)}" FacingPages="false" AllowPageShuffle="true" DocumentBleedTopOffset="0" DocumentBleedBottomOffset="0" DocumentBleedInsideOrLeftOffset="0" DocumentBleedOutsideOrRightOffset="0"/>
+  <GridPreference BaselineStart="${mg.toFixed(3)}" BaselineDivision="14.4" BaselineGridShown="false" ColumnGuidesShown="true" DocumentGridShown="false"/>
+  <MarginPreference Top="${mg.toFixed(3)}" Bottom="${mg.toFixed(3)}" Left="${mg.toFixed(3)}" Right="${mg.toFixed(3)}" ColumnCount="1" ColumnGutter="14.4"/>
+  <PasteboardPreference PasteboardMargins="116.220472440945 116.220472440945" MinimumSpaceBetweenPages="28.3464566929134" PreviewBackgroundColor="Color/C=0 M=0 Y=0 K=15"/>
+</idPkg:Preferences>` });
+
+  /* ---- Resources/Styles.xml（段落样式） ---- */
+  entries.push({ name: 'Resources/Styles.xml', data: buildStylesXML() });
+
+  /* ---- 为每页生成 Spread + Story ---- */
+  const spreadRefs = [];
+  const storyRefs  = [];
+  let   imgCounter = 0;
+
+  pagesData.forEach((pd, pi) => {
+    const spreadId    = `ub${pi}`;
+    const pageId      = `${spreadId}p`;
+    const textStoryId = `st_${spreadId}_txt`;
+    spreadRefs.push(spreadId);
+
+    // 生成该页文字 Story
+    entries.push({ name: `Stories/Story_${textStoryId}.xml`, data: buildStoryXML(textStoryId, pd) });
+    storyRefs.push(textStoryId);
+
+    // 生成 Spread（文字框 + 图片框）
+    entries.push({ name: `Spreads/Spread_${spreadId}.xml`, data: buildSpreadXML(spreadId, pageId, textStoryId, pd, pi, pw, ph, mg, cTop, cLeft, cBottom, cRight, cW, cH, imgCounter) });
+    imgCounter += pd.imgCount;
+  });
+
+  /* ---- designmap.xml ---- */
+  entries.push({ name: 'designmap.xml', data: buildDesignMap(spreadRefs, storyRefs, pw, ph, mg) });
+
+  /* ---- 生成并下载 ---- */
+  try {
+    const zipBytes = await buildZipStore(entries);
+    const blob = new Blob([zipBytes], { type: 'application/zip' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const projName = document.getElementById('proj-name')?.value || '景观设计';
+    a.href = url;
+    a.download = `${projName}.idml`;
+    a.click();
+    URL.revokeObjectURL(url);
+    // 调试输出：把第1页的 Story XML 打印到控制台，确认内容是否正确生成
+    console.group('IDML Debug Output');
+    console.log('=== 第1页 Story XML ===');
+    console.log(buildStoryXML(storyRefs[0], pagesData[0]));
+    console.log('=== 第1页 Spread XML ===');
+    console.log(buildSpreadXML('ub0','ub0p',storyRefs[0],pagesData[0],0,pw,ph,mg,cTop,cLeft,cBottom,cRight,cW,cH,0));
+    console.groupEnd();
+    toast('IDML 已导出，在 InDesign 中直接打开即可');
+  } catch(err) {
+    toast('导出失败：' + err.message);
+    console.error(err);
+  }
+}
+
+/* ================================================
+   生成 designmap.xml
+================================================ */
+function buildDesignMap(spreadRefs, storyRefs, pw, ph, mg) {
+  const spreadsXML = spreadRefs.map(id =>
+    `  <idPkg:Spread src="Spreads/Spread_${id}.xml"/>`).join('\n');
+  const storiesXML = storyRefs.map(id =>
+    `  <idPkg:Story src="Stories/Story_${id}.xml"/>`).join('\n');
+  // StoryList：InDesign 用于枚举所有 Story 的必需属性
+  const storyList = storyRefs.join(' ');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?aid style="50" type="document" readerVersion="6.0" featureSet="257" product="19.0(151)" ?>
+<Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"
+  DOMVersion="19.0"
+  Self="d"
+  ActiveLayer="lyr1"
+  StoryList="${storyList}"
+  Name="landscape-design"
+  ZeroPoint="0 0">
+  <idPkg:Fonts src="Resources/Fonts.xml"/>
+  <idPkg:Styles src="Resources/Styles.xml"/>
+  <idPkg:Preferences src="Resources/Preferences.xml"/>
+  <idPkg:Graphic src="Resources/Graphic.xml"/>
+  <Layer Self="lyr1" Name="Layer 1" Visible="true" Locked="false"
+    IgnoreWrap="false" ShowGuides="true" LockGuides="false"
+    UI="true" Expendable="true" Printable="true"/>
+${spreadsXML}
+  <idPkg:BackingStory src="XML/BackingStory.xml"/>
+  <idPkg:Tags src="XML/Tags.xml"/>
+${storiesXML}
+</Document>`;
+}
+
+/* ================================================
+   生成 Styles XML（段落样式）
+================================================ */
+function buildStylesXML() {
+  // 参照真实 InDesign 19.0 导出格式：
+  // 1. CharacterStyle 必须用 "[No character style]"（带方括号）
+  // 2. ParagraphStyle 必须有 "[No paragraph style]" 根样式，它定义 FillColor="Color/Black"
+  //    这是文字颜色的来源——缺少此样式会导致文字透明
+  // 3. NormalParagraphStyle 的 BasedOn 必须在 <Properties> 子元素里指定
+  // 4. ObjectStyle 名称必须带方括号，如 "[Normal Text Frame]"
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <RootCharacterStyleGroup Self="rootCharacterStyleGroup">
+    <CharacterStyle Self="CharacterStyle/$ID/[No character style]" Name="$ID/[No character style]"/>
+  </RootCharacterStyleGroup>
+  <RootParagraphStyleGroup Self="rootParagraphStyleGroup">
+    <!-- [No paragraph style] 是 InDesign 内置基础样式，定义默认黑色文字颜色 -->
+    <ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]"
+      Name="$ID/[No paragraph style]" FillColor="Color/Black">
+      <Properties>
+        <Leading type="enumeration">Auto</Leading>
+        <AppliedFont type="string">Microsoft YaHei</AppliedFont>
+      </Properties>
+    </ParagraphStyle>
+    <!-- NormalParagraphStyle 继承自 [No paragraph style] -->
+    <ParagraphStyle Self="ParagraphStyle/$ID/NormalParagraphStyle"
+      Name="$ID/NormalParagraphStyle"
+      NextStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+      <Properties>
+        <BasedOn type="string">$ID/[No paragraph style]</BasedOn>
+      </Properties>
+    </ParagraphStyle>
+  </RootParagraphStyleGroup>
+  <RootTableStyleGroup Self="rootTableStyleGroup">
+    <TableStyle Self="TableStyle/$ID/[No table style]" Name="$ID/[No table style]"/>
+    <TableStyle Self="TableStyle/$ID/[Basic Table]" Name="$ID/[Basic Table]">
+      <Properties><BasedOn type="string">$ID/[No table style]</BasedOn></Properties>
+    </TableStyle>
+  </RootTableStyleGroup>
+  <RootCellStyleGroup Self="rootCellStyleGroup">
+    <CellStyle Self="CellStyle/$ID/[None]" Name="$ID/[None]"/>
+  </RootCellStyleGroup>
+  <!-- ObjectStyle 必须用方括号格式，与 InDesign 内置样式名一致 -->
+  <RootObjectStyleGroup Self="rootObjectStyleGroup">
+    <ObjectStyle Self="ObjectStyle/$ID/[None]"                Name="$ID/[None]"/>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Graphics Frame]" Name="$ID/[Normal Graphics Frame]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Text Frame]"   Name="$ID/[Normal Text Frame]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Grid]"         Name="$ID/[Normal Grid]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+  </RootObjectStyleGroup>
+</idPkg:Styles>`;
+}
+
+/* ================================================
+   生成 Story XML（文字内容）
+================================================ */
+function buildStoryXML(storyId, pd) {
+  function escXML(str) {
+    return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  const lines = [];
+
+  // 章节标签
+  lines.push(`<ParaStyle:章节标签>${escXML(pd.ch)}`);
+  // 页面标题
+  lines.push(`<ParaStyle:页面标题>${escXML(pd.title)}`);
+  // 正文
+  if (pd.content) {
+    const paragraphs = pd.content.split('\n').filter(l => l.trim());
+    paragraphs.forEach(para => {
+      lines.push(`<ParaStyle:正文>${escXML(para.trim())}`);
+    });
+  }
+  // 关键词
+  if (pd.keywords && pd.keywords.length) {
+    pd.keywords.forEach(kw => {
+      lines.push(`<ParaStyle:关键词>• ${escXML(kw)}`);
+    });
+  }
+
+  // 字体颜色映射（每种段落样式对应的CMYK颜色，必须在CharacterStyleRange上显式指定）
+  const styleColorMap = {
+    'chapter': 'Color/C=0 M=0 Y=0 K=60',
+    'title':   'Color/C=0 M=0 Y=0 K=100',
+    'body':    'Color/C=0 M=0 Y=0 K=85',
+    'kw':      'Color/C=0 M=0 Y=0 K=80',
+    'normal':  'Color/C=0 M=0 Y=0 K=100',
+  };
+  // 字体大小映射（单位：pt）
+  const styleSizeMap = {
+    'chapter': '9',
+    'title':   '24',
+    'body':    '18',
+    'kw':      '14',
+    'normal':  '18',
+  };
+
+  // 构建 Story XML
+  // 关键规则：
+  // 1. 使用 InDesign 内置样式名 $ID/NormalParagraphStyle，避免自定义样式名称解析失败
+  // 2. <Br/> 必须放在单独的 CharacterStyleRange 内（与 InDesign 自身导出格式一致）
+  // 3. FillColor 在 CharacterStyleRange 上显式指定颜色
+  const contentXML = lines.map(l => {
+    const colonIdx = l.indexOf('>');
+    const text = l.slice(colonIdx + 1);
+    const styleName = l.slice('<ParaStyle:'.length, colonIdx);
+    const styleId = styleNameToId(styleName);
+    const fillColor = styleColorMap[styleId] || 'Color/C=0 M=0 Y=0 K=100';
+    const ptSize = styleSizeMap[styleId] || '18';
+    const isBold = (styleId === 'title' || styleId === 'kw');
+    const fontStyle = isBold ? 'Bold' : 'Regular';
+    // 字体必须放在 <Properties> 子元素里（InDesign 标准格式），不能作为属性
+    // AppliedCharacterStyle 用 "[No character style]"（带方括号，InDesign 内置名称）
+    return `    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"
+        FontStyle="${fontStyle}" PointSize="${ptSize}"
+        Leading="${Math.round(+ptSize * 1.5)}" FillColor="${fillColor}">
+        <Properties>
+          <AppliedFont type="string">Microsoft YaHei</AppliedFont>
+        </Properties>
+        <Content>${text}</Content>
+      </CharacterStyleRange>
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
+        <Br/>
+      </CharacterStyleRange>
+    </ParagraphStyleRange>`;
+  }).join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <Story Self="${storyId}" AppliedTOCStyle="n" TrackChanges="false" StoryTitle="${escXML(pd.title)}">
+    <StoryPreference OpticalMarginAlignment="false" OpticalMarginSize="12" FrameType="TextFrameType" StoryOrientation="Horizontal" StoryDirection="LeftToRightDirection"/>
+    <InCopyExportOption IncludeGraphicProxies="true" IncludeAllResources="false"/>
+${contentXML}
+  </Story>
+</idPkg:Story>`;
+}
+
+function styleNameToId(name) {
+  const map = { '章节标签':'chapter', '页面标题':'title', '正文':'body', '关键词':'kw' };
+  return map[name] || 'normal';
+}
+
+/* ================================================
+   生成 Spread XML（页面布局：文字框 + 图片框）
+================================================ */
+function buildSpreadXML(spreadId, pageId, textStoryId, pd, pageIndex, pw, ph, mg, cTop, cLeft, cBottom, cRight, cW, cH, imgStartIdx) {
+  const pageItems = [];
+
+  // 按页面布局放置文字框和图片框（每页只有1个文字框对应1个Story）
+  const layout = pd.layout;
+
+  // 正文区从内容区顶部开始
+  const bodyTop    = cTop;
+  const bodyLeft   = cLeft;
+  const bodyBottom = cBottom;
+  const bodyRight  = cRight;
+  const bodyW      = cW;
+  const bodyH      = cBottom - bodyTop;
+
+  if (layout === 'text-right') {
+    // 图片区（左57%）+ 文字区（右43%）
+    const imgAreaW = bodyW * 0.57;
+    const textAreaW = bodyW - imgAreaW - 8;
+    const textAreaLeft = bodyLeft + imgAreaW + 8;
+    // 大图（左上65%高度）
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyTop + bodyH * 0.65, bodyLeft + imgAreaW, spreadId, pw, ph));
+    // 小图左（下35%，左半）
+    const smallTop = bodyTop + bodyH * 0.65 + 4;
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, smallTop, bodyLeft, bodyBottom, bodyLeft + imgAreaW/2 - 2, spreadId, pw, ph));
+    // 小图右（下35%，右半）
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, smallTop, bodyLeft + imgAreaW/2 + 2, bodyBottom, bodyLeft + imgAreaW, spreadId, pw, ph));
+    // 右侧文字框（复用 textStoryId 但单独帧）
+    const rfId = `tf_${spreadId}_body`;
+    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId, pw, ph));
+  } else if (layout === 'text-right-grid') {
+    // 基地分析：3列2行网格+右侧文字
+    const imgAreaW = bodyW * 0.67;
+    const textAreaLeft = bodyLeft + imgAreaW + 8;
+    const textAreaW = bodyRight - textAreaLeft;
+    const gap = 4;
+    const col1 = bodyLeft; const col2 = bodyLeft + imgAreaW/3 + gap; const col3 = bodyLeft + imgAreaW/3*2 + gap*2;
+    const colW = imgAreaW/3 - gap;
+    const row1H = bodyH * 0.58; const row2H = bodyH - row1H - gap;
+    const row2Top = bodyTop + row1H + gap;
+    // 大图（跨前2列，第1行）
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, col1, bodyTop + row1H, col1 + colW*2 + gap, spreadId, pw, ph));
+    // 右侧文字覆盖区（第3列，第1行）- 文字框
+    const rf2Id = `tf_${spreadId}_body`;
+    pageItems.push(buildTextFrame(rf2Id, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId, pw, ph));
+    // 第2行3个小图
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, row2Top, col1, bodyBottom, col1 + colW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, row2Top, col2, bodyBottom, col2 + colW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_4`, row2Top, col3, bodyBottom, col3 + colW, spreadId, pw, ph));
+  } else if (layout === 'text-left') {
+    // 建筑分析：文字（左34%）+ 图片网格（右66%）
+    const textAreaW = bodyW * 0.34;
+    const imgAreaLeft = bodyLeft + textAreaW + 8;
+    const imgW = bodyRight - imgAreaLeft;
+    const rfId = `tf_${spreadId}_body`;
+    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, bodyLeft, bodyBottom, bodyLeft + textAreaW, spreadId, pw, ph));
+    // 图片网格：上大图（跨2列）+ 下2图
+    const gap = 4;
+    const col1 = imgAreaLeft; const col2 = imgAreaLeft + imgW/2 + gap/2;
+    const colW = imgW/2 - gap/2;
+    const row1H = bodyH * 0.57;
+    const row2Top = bodyTop + row1H + gap;
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, imgAreaLeft, bodyTop + row1H, bodyRight, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, row2Top, col1, bodyBottom, col1 + colW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, row2Top, col2, bodyBottom, col2 + colW, spreadId, pw, ph));
+  } else if (layout === 'grid-overlay') {
+    // 灵感来源：2x2图片网格 + 中央浮动文字框
+    const gap = 6;
+    const halfW = (bodyW - gap) / 2;
+    const halfH = (bodyH - gap) / 2;
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyTop + halfH, bodyLeft + halfW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, bodyTop, bodyLeft + halfW + gap, bodyTop + halfH, bodyRight, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, bodyTop + halfH + gap, bodyLeft, bodyBottom, bodyLeft + halfW, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_4`, bodyTop + halfH + gap, bodyLeft + halfW + gap, bodyBottom, bodyRight, spreadId, pw, ph));
+    // 中央文字叠加框
+    const ovW = bodyW * 0.44; const ovH = bodyH * 0.4;
+    const ovLeft = bodyLeft + (bodyW - ovW) / 2;
+    const ovTop  = bodyTop  + (bodyH - ovH) / 2;
+    const rfId = `tf_${spreadId}_overlay`;
+    pageItems.push(buildTextFrame(rfId, textStoryId, ovTop, ovLeft, ovTop + ovH, ovLeft + ovW, spreadId, pw, ph));
+  } else if (layout === 'text-top') {
+    // 设计理念：正文在上 + 下方左大图+右2图
+    const textH = bodyH * 0.28;
+    const imgTop = bodyTop + textH + 6;
+    const rfId = `tf_${spreadId}_body`;
+    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, bodyLeft, bodyTop + textH, bodyRight, spreadId, pw, ph));
+    const imgW_left = bodyW * 0.58; const imgW_right = bodyW - imgW_left - 6;
+    const rightLeft = bodyLeft + imgW_left + 6;
+    const halfH = (bodyH - textH - 6 - 4) / 2;
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, imgTop, bodyLeft, bodyBottom, bodyLeft + imgW_left, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_2`, imgTop, rightLeft, imgTop + halfH, bodyRight, spreadId, pw, ph));
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_3`, imgTop + halfH + 4, rightLeft, bodyBottom, bodyRight, spreadId, pw, ph));
+  } else if (layout === 'list-right') {
+    // 主题落位：大图（左65%）+ 分区列表文字（右35%）
+    const imgAreaW = bodyW * 0.63;
+    const textAreaLeft = bodyLeft + imgAreaW + 8;
+    pageItems.push(buildGraphicFrame(`gf_${spreadId}_1`, bodyTop, bodyLeft, bodyBottom, bodyLeft + imgAreaW, spreadId, pw, ph));
+    const rfId = `tf_${spreadId}_body`;
+    pageItems.push(buildTextFrame(rfId, textStoryId, bodyTop, textAreaLeft, bodyBottom, bodyRight, spreadId, pw, ph));
+  }
+
+  const pageItemsXML = pageItems.join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Spread xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <Spread Self="${spreadId}" PageCount="1" BindingLocation="0" AllowPageShuffle="true">
+    <FlattenerPreference LineArtAndTextResolution="300" GradientAndMeshResolution="150" ClipComplexRegions="false" ConvertAllStrokesToOutlines="false" ConvertAllTextToOutlines="false"/>
+    <!-- 页面中心在 Spread(0,0)，ItemTransform = -pw/2, -ph/2（真实 InDesign 导出格式） -->
+    <Page Self="${pageId}" MasterPageTransform="1 0 0 1 0 0" Name="${pageIndex + 1}" AppliedMaster="n"
+      GeometricBounds="0 0 ${ph.toFixed(3)} ${pw.toFixed(3)}"
+      ItemTransform="1 0 0 1 ${(-pw/2).toFixed(3)} ${(-ph/2).toFixed(3)}">
+      <MarginPreference Top="${mg.toFixed(3)}" Bottom="${mg.toFixed(3)}" Left="${mg.toFixed(3)}" Right="${mg.toFixed(3)}" ColumnCount="1" ColumnGutter="14.4"/>
+    </Page>
+${pageItemsXML}
+  </Spread>
+</idPkg:Spread>`;
+}
+
+/* ---- 创建文字框 ---- */
+// top/left/bottom/right：页面坐标（mm×2.834645，原点=页面左上角）
+// pw/ph：页面尺寸（pt）
+// InDesign 坐标系：页面中心在 Spread(0,0)，ItemTransform 指向帧中心
+// 帧中心在 Spread 的坐标 = 页面坐标中心 - 页面尺寸的一半
+function buildTextFrame(selfId, storyId, top, left, bottom, right, spreadId, pw, ph) {
+  const w  = right - left;
+  const h  = bottom - top;
+  const hw = (w / 2).toFixed(3);
+  const hh = (h / 2).toFixed(3);
+  // 帧中心在 Spread 的坐标
+  const cx = ((left + right) / 2 - pw / 2).toFixed(3);
+  const cy = ((top + bottom) / 2 - ph / 2).toFixed(3);
+  return `    <TextFrame Self="${selfId}" ParentStory="${storyId}" PreviousTextFrame="n" NextTextFrame="n"
+      ContentType="TextType" AppliedObjectStyle="ObjectStyle/$ID/[Normal Text Frame]"
+      ItemTransform="1 0 0 1 ${cx} ${cy}"
+      ItemLayer="lyr1">
+      <Properties>
+        <PathGeometry>
+          <GeometryPathType PathOpen="false">
+            <PathPointArray>
+              <PathPointType Anchor="-${hw} -${hh}" LeftDirection="-${hw} -${hh}" RightDirection="-${hw} -${hh}"/>
+              <PathPointType Anchor="-${hw} ${hh}"  LeftDirection="-${hw} ${hh}"  RightDirection="-${hw} ${hh}"/>
+              <PathPointType Anchor="${hw} ${hh}"   LeftDirection="${hw} ${hh}"   RightDirection="${hw} ${hh}"/>
+              <PathPointType Anchor="${hw} -${hh}"  LeftDirection="${hw} -${hh}"  RightDirection="${hw} -${hh}"/>
+            </PathPointArray>
+          </GeometryPathType>
+        </PathGeometry>
+      </Properties>
+      <TextFramePreference TextColumnCount="1" TextColumnGutter="14.173"
+        VerticalJustification="TopAlign" FirstBaselineOffset="EmboxHeight">
+        <Properties>
+          <InsetSpacing type="list">
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+          </InsetSpacing>
+        </Properties>
+      </TextFramePreference>
+    </TextFrame>`;
+}
+
+/* ---- 创建图片框（空占位，InDesign 中可直接置入图片） ---- */
+// 坐标系同 buildTextFrame：页面中心在 Spread(0,0)，ItemTransform 指向帧中心
+function buildGraphicFrame(selfId, top, left, bottom, right, spreadId, pw, ph) {
+  const w  = right - left;
+  const h  = bottom - top;
+  const hw = (w / 2).toFixed(3);
+  const hh = (h / 2).toFixed(3);
+  const cx = ((left + right) / 2 - pw / 2).toFixed(3);
+  const cy = ((top + bottom) / 2 - ph / 2).toFixed(3);
+  return `    <Rectangle Self="${selfId}"
+      ContentType="GraphicType" AppliedObjectStyle="ObjectStyle/$ID/[Normal Graphics Frame]"
+      StrokeWeight="1" StrokeColor="Color/C=0 M=0 Y=0 K=15" FillColor="Color/None"
+      ItemTransform="1 0 0 1 ${cx} ${cy}"
+      ItemLayer="lyr1">
+      <Properties>
+        <PathGeometry>
+          <GeometryPathType PathOpen="false">
+            <PathPointArray>
+              <PathPointType Anchor="-${hw} -${hh}" LeftDirection="-${hw} -${hh}" RightDirection="-${hw} -${hh}"/>
+              <PathPointType Anchor="-${hw} ${hh}"  LeftDirection="-${hw} ${hh}"  RightDirection="-${hw} ${hh}"/>
+              <PathPointType Anchor="${hw} ${hh}"   LeftDirection="${hw} ${hh}"   RightDirection="${hw} ${hh}"/>
+              <PathPointType Anchor="${hw} -${hh}"  LeftDirection="${hw} -${hh}"  RightDirection="${hw} -${hh}"/>
+            </PathPointArray>
+          </GeometryPathType>
+        </PathGeometry>
+      </Properties>
+    </Rectangle>`;
+}
+
+/* ================================================
+   最小化 IDML 测试（用于诊断 InDesign 是否能打开任何 IDML）
+   这个函数生成绝对最简单的合法 IDML：
+   一页 A3 横向空白文档，只有一行英文文字，无任何自定义样式
+   如果这个文件也无法打开 → 问题在 JSZip 或 InDesign 安装
+   如果这个文件可以打开  → 问题在完整版 XML 的某个细节
+================================================ */
+async function testMinimalIDML() {
+  const MM = 2.834645;
+  const pwN = 420 * MM, phN = 297 * MM, mgN = 20 * MM;
+  const pw = pwN.toFixed(3); // 1190.551pt（A3横向宽）
+  const ph = phN.toFixed(3); // 841.890pt（A3横向高）
+  const mg = mgN.toFixed(3); // 56.693pt（边距）
+  // 文字框从边距到对边（全内容区）
+  // 帧中心在页面中心 = pwN/2, phN/2；在Spread坐标系中心减去页面半尺寸 = (0, 0)
+  const tfCX = '0';                            // 文字框中心 Spread X = pwN/2 - pwN/2
+  const tfCY = '0';                            // 文字框中心 Spread Y = phN/2 - phN/2
+  const tfHW = ((pwN - 2*mgN)/2).toFixed(3);  // 文字框半宽
+  const tfHH = ((phN - 2*mgN)/2).toFixed(3);  // 文字框半高
+
+  const entries = [];
+
+  // 1. mimetype（必须第一个、不压缩）
+  entries.push({ name: 'mimetype', data: 'application/vnd.adobe.indesign-idml-package' });
+
+  // 2. META-INF/container.xml
+  entries.push({ name: 'META-INF/container.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+  <rootfiles>
+    <rootfile full-path="designmap.xml" media-type="application/vnd.adobe.indesign-idml-package"/>
+  </rootfiles>
+</container>` });
+
+  // 3. XML/Tags.xml
+  entries.push({ name: 'XML/Tags.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Tags xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+</idPkg:Tags>` });
+
+  // 4. XML/BackingStory.xml
+  entries.push({ name: 'XML/BackingStory.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <XmlStory Self="u_bs" AppliedTOCStyle="n" TrackChanges="false" StoryTitle="$ID/NullString">
+    <StoryPreference OpticalMarginAlignment="false" OpticalMarginSize="12" FrameType="TextFrameType" StoryOrientation="Horizontal" StoryDirection="LeftToRightDirection"/>
+    <InCopyExportOption IncludeGraphicProxies="true" IncludeAllResources="false"/>
+  </XmlStory>
+</idPkg:Story>` });
+
+  // 5. Resources/Fonts.xml（空）
+  entries.push({ name: 'Resources/Fonts.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Fonts xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+</idPkg:Fonts>` });
+
+  // 6. Resources/Graphic.xml - 颜色 Self ID 用 InDesign 标准格式 "Color/Black"
+  entries.push({ name: 'Resources/Graphic.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Graphic xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <ColorGroup Self="u_cg" Name="$ID/">
+    <Color Self="Color/Black" Name="Black" Model="Process" Space="CMYK" ColorValue="0 0 0 100" IsSpot="false"/>
+    <Color Self="Color/None"  Name="$ID/None" Model="Process" Space="CMYK" ColorValue="0 0 0 0" IsSpot="false"/>
+  </ColorGroup>
+</idPkg:Graphic>` });
+
+  // 7. Resources/Styles.xml - 完全匹配真实 InDesign 导出格式：
+  //   - "[No paragraph style]" 根样式定义 FillColor="Color/Black"（文字颜色来源）
+  //   - "[No character style]" 是 InDesign 内置必需样式名（带方括号）
+  //   - ObjectStyle 名称带方括号
+  entries.push({ name: 'Resources/Styles.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Styles xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <RootCharacterStyleGroup Self="u_csg">
+    <CharacterStyle Self="CharacterStyle/$ID/[No character style]" Name="$ID/[No character style]"/>
+  </RootCharacterStyleGroup>
+  <RootParagraphStyleGroup Self="u_psg">
+    <ParagraphStyle Self="ParagraphStyle/$ID/[No paragraph style]"
+      Name="$ID/[No paragraph style]" FillColor="Color/Black">
+      <Properties>
+        <Leading type="enumeration">Auto</Leading>
+      </Properties>
+    </ParagraphStyle>
+    <ParagraphStyle Self="ParagraphStyle/$ID/NormalParagraphStyle"
+      Name="$ID/NormalParagraphStyle" NextStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+      <Properties>
+        <BasedOn type="string">$ID/[No paragraph style]</BasedOn>
+      </Properties>
+    </ParagraphStyle>
+  </RootParagraphStyleGroup>
+  <RootTableStyleGroup Self="u_tsg">
+    <TableStyle Self="TableStyle/$ID/[No table style]" Name="$ID/[No table style]"/>
+  </RootTableStyleGroup>
+  <RootCellStyleGroup Self="u_cellsg">
+    <CellStyle Self="CellStyle/$ID/[None]" Name="$ID/[None]"/>
+  </RootCellStyleGroup>
+  <RootObjectStyleGroup Self="u_osg">
+    <ObjectStyle Self="ObjectStyle/$ID/[None]"                Name="$ID/[None]"/>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Text Frame]"   Name="$ID/[Normal Text Frame]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Graphics Frame]" Name="$ID/[Normal Graphics Frame]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+    <ObjectStyle Self="ObjectStyle/$ID/[Normal Grid]"         Name="$ID/[Normal Grid]">
+      <Properties><BasedOn type="string">$ID/[None]</BasedOn></Properties>
+    </ObjectStyle>
+  </RootObjectStyleGroup>
+</idPkg:Styles>` });
+
+  // 8. Resources/Preferences.xml
+  entries.push({ name: 'Resources/Preferences.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Preferences xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <DocumentPreference PageWidth="${pw}" PageHeight="${ph}" FacingPages="false" AllowPageShuffle="true" DocumentBleedTopOffset="0" DocumentBleedBottomOffset="0" DocumentBleedInsideOrLeftOffset="0" DocumentBleedOutsideOrRightOffset="0"/>
+  <MarginPreference Top="${mg}" Bottom="${mg}" Left="${mg}" Right="${mg}" ColumnCount="1" ColumnGutter="14.4"/>
+</idPkg:Preferences>` });
+
+  // 9. Stories/Story_u_s1.xml
+  // 字体放在 <Properties> 子元素，AppliedCharacterStyle 用 "[No character style]"
+  entries.push({ name: 'Stories/Story_u_s1.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Story xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <Story Self="u_s1" AppliedTOCStyle="n" TrackChanges="false" StoryTitle="Test">
+    <StoryPreference OpticalMarginAlignment="false" OpticalMarginSize="12" FrameType="TextFrameType" StoryOrientation="Horizontal" StoryDirection="LeftToRightDirection"/>
+    <InCopyExportOption IncludeGraphicProxies="true" IncludeAllResources="false"/>
+    <ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/$ID/NormalParagraphStyle">
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"
+        PointSize="24" Leading="32">
+        <Content>Hello InDesign - Test</Content>
+      </CharacterStyleRange>
+      <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">
+        <Br/>
+      </CharacterStyleRange>
+    </ParagraphStyleRange>
+  </Story>
+</idPkg:Story>` });
+
+  // 10. Spreads/Spread_u_sp1.xml
+  // Page ItemTransform = -pw/2, -ph/2（真实 InDesign 格式：页面中心在 Spread 原点）
+  // TextFrame 使用 PathGeometry，ItemTransform 指向帧中心
+  entries.push({ name: 'Spreads/Spread_u_sp1.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<idPkg:Spread xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging" DOMVersion="19.0">
+  <Spread Self="u_sp1" PageCount="1" BindingLocation="0" AllowPageShuffle="true">
+    <FlattenerPreference LineArtAndTextResolution="300" GradientAndMeshResolution="150" ClipComplexRegions="false" ConvertAllStrokesToOutlines="false" ConvertAllTextToOutlines="false"/>
+    <Page Self="u_pg1" Name="1" AppliedMaster="n"
+      MasterPageTransform="1 0 0 1 0 0"
+      GeometricBounds="0 0 ${ph} ${pw}"
+      ItemTransform="1 0 0 1 ${(-pwN/2).toFixed(3)} ${(-phN/2).toFixed(3)}">
+      <MarginPreference Top="${mg}" Bottom="${mg}" Left="${mg}" Right="${mg}" ColumnCount="1" ColumnGutter="14.4"/>
+    </Page>
+    <TextFrame Self="u_tf1" ParentStory="u_s1" PreviousTextFrame="n" NextTextFrame="n"
+      ContentType="TextType" AppliedObjectStyle="ObjectStyle/$ID/[Normal Text Frame]"
+      ItemTransform="1 0 0 1 ${tfCX} ${tfCY}"
+      ItemLayer="u_lyr1">
+      <Properties>
+        <PathGeometry>
+          <GeometryPathType PathOpen="false">
+            <PathPointArray>
+              <PathPointType Anchor="-${tfHW} -${tfHH}" LeftDirection="-${tfHW} -${tfHH}" RightDirection="-${tfHW} -${tfHH}"/>
+              <PathPointType Anchor="-${tfHW} ${tfHH}"  LeftDirection="-${tfHW} ${tfHH}"  RightDirection="-${tfHW} ${tfHH}"/>
+              <PathPointType Anchor="${tfHW} ${tfHH}"   LeftDirection="${tfHW} ${tfHH}"   RightDirection="${tfHW} ${tfHH}"/>
+              <PathPointType Anchor="${tfHW} -${tfHH}"  LeftDirection="${tfHW} -${tfHH}"  RightDirection="${tfHW} -${tfHH}"/>
+            </PathPointArray>
+          </GeometryPathType>
+        </PathGeometry>
+      </Properties>
+      <TextFramePreference TextColumnCount="1" TextColumnGutter="14.173"
+        VerticalJustification="TopAlign" FirstBaselineOffset="EmboxHeight">
+        <Properties>
+          <InsetSpacing type="list">
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+            <ListItem type="unit">0</ListItem>
+          </InsetSpacing>
+        </Properties>
+      </TextFramePreference>
+    </TextFrame>
+  </Spread>
+</idPkg:Spread>` });
+
+  // 11. designmap.xml
+  // 关键：必须有 <?aid?> 处理指令，InDesign 用它识别 IDML 包的文档类型
+  // FeatureSet 放在 <?aid?> 里，不是 Document 属性（来自真实 InDesign 导出对比）
+  entries.push({ name: 'designmap.xml', data:
+`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?aid style="50" type="document" readerVersion="6.0" featureSet="257" product="19.0(151)" ?>
+<Document xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"
+  DOMVersion="19.0" Self="d" ActiveLayer="u_lyr1" StoryList="u_s1"
+  Name="untitled-1" ZeroPoint="0 0">
+  <idPkg:Fonts src="Resources/Fonts.xml"/>
+  <idPkg:Styles src="Resources/Styles.xml"/>
+  <idPkg:Preferences src="Resources/Preferences.xml"/>
+  <idPkg:Graphic src="Resources/Graphic.xml"/>
+  <Layer Self="u_lyr1" Name="Layer 1" Visible="true" Locked="false"
+    IgnoreWrap="false" ShowGuides="true" LockGuides="false"
+    UI="true" Expendable="true" Printable="true"/>
+  <idPkg:Spread src="Spreads/Spread_u_sp1.xml"/>
+  <idPkg:BackingStory src="XML/BackingStory.xml"/>
+  <idPkg:Tags src="XML/Tags.xml"/>
+  <idPkg:Story src="Stories/Story_u_s1.xml"/>
+</Document>` });
+
+  try {
+    const zipBytes = await buildZipStore(entries);
+
+    /* ---- 诊断：输出 ZIP 头字节到控制台，供开发者分析 ---- */
+    const hexLines = [];
+    for (let i = 0; i < Math.min(zipBytes.length, 256); i += 16) {
+      const slice = zipBytes.slice(i, i + 16);
+      const hex  = Array.from(slice).map(b => b.toString(16).padStart(2,'0').toUpperCase()).join(' ');
+      const ascii = Array.from(slice).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
+      hexLines.push(`${String(i).padStart(4,'0')}: ${hex.padEnd(47)}  ${ascii}`);
+    }
+    console.group('=== IDML ZIP 诊断输出（请截图或复制发给开发者）===');
+    console.log('文件总大小:', zipBytes.length, '字节');
+    console.log('前4字节签名（正确应为 50 4B 03 04）:',
+      Array.from(zipBytes.slice(0,4)).map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' '));
+    console.log('第27-28字节 extra field 长度（应为 00 00）:',
+      Array.from(zipBytes.slice(28,30)).map(b=>b.toString(16).padStart(2,'0').toUpperCase()).join(' '));
+    console.log('文件名区（第30字节起，应为 "mimetype"）:',
+      String.fromCharCode(...zipBytes.slice(30, 38)));
+    console.log('\n--- 完整 HEX DUMP（前256字节）---');
+    console.log(hexLines.join('\n'));
+    console.groupEnd();
+
+    const blob = new Blob([zipBytes], { type: 'application/zip' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'test_minimal.idml';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('已导出 + 在 F12 控制台输出诊断信息');
+  } catch(e) {
+    toast('生成失败：' + e.message);
+    console.error(e);
+  }
+}
+
+/* ================================================
+   Toast 通知
+================================================ */
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove('show'), 2800);
+}
+</script>
+</body>
+</html>
